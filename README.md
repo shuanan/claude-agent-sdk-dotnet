@@ -10,9 +10,13 @@ A .NET client for Claude Code: it launches the local `claude` CLI and talks to i
 
 ## 狀態 / Status
 
-第一版的功能都完成了，還沒發佈到 NuGet。
+預覽版已經發佈到 NuGet；1.0 之前 API 可能還會變。
 
-The first-release features are done; not yet published to NuGet.
+A preview is available on NuGet; the API may still change before 1.0.
+
+```bash
+dotnet add package PamisWang.ClaudeAgentSdk --prerelease
+```
 
 | 對照 / Tracks | 版本 / Version |
 |---|---|
