@@ -15,3 +15,8 @@
   CLI 撤回詢問時取消回呼且不回覆；中斷；送出使用者訊息。
 - 權限：`ClaudeAgentOptions.CanUseTool`，以及 `Permissions` 命名空間的 `ToolPermissionRequest`、
   `PermissionResult`（`PermissionResultAllow`、`PermissionResultDeny`）、`PermissionUpdate`、`PermissionRuleValue`。
+- 訊息：`Messages` 命名空間的訊息型別（`AssistantMessage`、`UserMessage`、`SystemMessage`、`ResultMessage`、
+  `StreamEvent`、`RateLimitEvent`、`ConversationResetMessage`、`UnknownMessage`）與內容區塊（`TextBlock`、
+  `ThinkingBlock`、`ToolUseBlock`、`ToolResultBlock`、`ServerToolUseBlock`、`ServerToolResultBlock`、`UnknownContentBlock`），
+  每個都保留原始 JSON（`Raw`）。parser 的必要欄位跟 Python SDK 一樣，缺了丟 `MessageParseException`；
+  不認得的訊息型別與內容區塊原樣保留，不丟掉。

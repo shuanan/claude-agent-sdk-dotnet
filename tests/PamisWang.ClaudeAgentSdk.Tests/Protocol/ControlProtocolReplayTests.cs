@@ -32,7 +32,9 @@ public sealed class ControlProtocolReplayTests
     {
         await using var session = await ReplaySession.StartAsync("basic");
 
-        Assert.Equal("2.1.309", session.InitializeResponse.GetProperty("claude_code_version").GetString());
+        Assert.Equal(
+            session.Fixture.Meta.GetProperty("cli_version").GetString(),
+            session.InitializeResponse.GetProperty("claude_code_version").GetString());
     }
 
     [Fact]
