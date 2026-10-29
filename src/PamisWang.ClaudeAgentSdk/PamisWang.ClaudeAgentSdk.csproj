@@ -8,13 +8,23 @@
   <!-- NuGet 套件 -->
   <PropertyGroup>
     <PackageId>PamisWang.ClaudeAgentSdk</PackageId>
-    <Version>0.1.0</Version>
+    <!-- 發佈時推 v{Version} 的 tag，release workflow 會檢查兩者一致 -->
+    <Version>0.1.0-preview.1</Version>
     <Authors>Pamis Wang</Authors>
-    <Description>Claude Code 的 .NET 用戶端，移植自官方 Python Agent SDK（非官方）。</Description>
+    <Copyright>Copyright (c) 2026 Pamis Wang</Copyright>
+    <Description>Claude Code 的 .NET 用戶端，移植自官方 Python Agent SDK（非官方）。Unofficial .NET client for Claude Code, ported from the official Python Agent SDK.</Description>
+    <PackageTags>claude;claude-code;agent;sdk;ai;llm</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/pamis-wang/claude-agent-sdk-dotnet</PackageProjectUrl>
+    <PackageReleaseNotes>https://github.com/pamis-wang/claude-agent-sdk-dotnet/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <RepositoryUrl>https://github.com/pamis-wang/claude-agent-sdk-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <!-- SourceLink：除錯時從 GitHub 取得這個 commit 的原始碼；沒進版控的產生檔直接嵌進 PDB -->
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <!-- CI 上建置時把本機路徑換成固定的 /_/，同一份原始碼建出同樣的結果 -->
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
