@@ -18,6 +18,7 @@ Work in progress; not usable yet.
 |---|---|
 | Python SDK | v0.2.174 |
 | Claude Code CLI | 2.1.312（Python SDK v0.2.174 打包的版本 / bundled with Python SDK v0.2.174） |
+| 錄協定樣本用的 CLI / CLI used to record protocol fixtures | 2.1.309 |
 
 ## 第一版的範圍 / Scope of the first release
 
