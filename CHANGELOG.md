@@ -20,3 +20,5 @@
   `ThinkingBlock`、`ToolUseBlock`、`ToolResultBlock`、`ServerToolUseBlock`、`ServerToolResultBlock`、`UnknownContentBlock`），
   每個都保留原始 JSON（`Raw`）。parser 的必要欄位跟 Python SDK 一樣，缺了丟 `MessageParseException`；
   不認得的訊息型別與內容區塊原樣保留，不丟掉。
+- `ClaudeAgentClient`：`ConnectAsync`（啟動 CLI 並完成初始化握手）、`SendAsync`、`ReceiveMessagesAsync`、
+  `ReceiveResponseAsync`、`InterruptAsync`、`ServerInfo`、`DisposeAsync`。一個 client 只連線一次。

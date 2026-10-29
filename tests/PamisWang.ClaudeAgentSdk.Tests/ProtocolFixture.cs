@@ -22,6 +22,14 @@ internal sealed class ProtocolFixture
     /// <summary>從 CLI 讀到的訊息。</summary>
     public IReadOnlyList<JsonElement> Received => [.. Entries.Where(e => e.Direction == "recv").Select(e => e.Data)];
 
+    /// <summary>依序送出的使用者訊息內容。</summary>
+    public IReadOnlyList<string> UserPrompts =>
+    [
+        .. Entries
+            .Where(e => e.Direction == "send" && e.Data.GetProperty("type").GetString() == "user")
+            .Select(e => e.Data.GetProperty("message").GetProperty("content").GetString()!),
+    ];
+
     public static TheoryData<string> Names()
     {
         var names = new TheoryData<string>();
