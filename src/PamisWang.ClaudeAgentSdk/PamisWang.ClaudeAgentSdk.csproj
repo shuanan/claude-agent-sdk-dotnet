@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsAotCompatible>true</IsAotCompatible>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!-- NuGet 套件 -->
+  <PropertyGroup>
+    <PackageId>PamisWang.ClaudeAgentSdk</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Pamis Wang</Authors>
+    <Description>Claude Code 的 .NET 用戶端，移植自官方 Python Agent SDK（非官方）。</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <!-- 含移植自 Python SDK 的程式碼，MIT 授權要求保留它的版權聲明 -->
+    <None Include="..\..\NOTICE" Pack="true" PackagePath="\" />
+    <InternalsVisibleTo Include="PamisWang.ClaudeAgentSdk.Tests" />
+  </ItemGroup>
+
+</Project>
