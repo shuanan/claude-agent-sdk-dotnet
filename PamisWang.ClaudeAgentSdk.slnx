@@ -13,6 +13,7 @@
     <Project Path="src/PamisWang.ClaudeAgentSdk/PamisWang.ClaudeAgentSdk.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/PamisWang.ClaudeAgentSdk.FakeCli/PamisWang.ClaudeAgentSdk.FakeCli.csproj" />
     <Project Path="tests/PamisWang.ClaudeAgentSdk.Tests/PamisWang.ClaudeAgentSdk.Tests.csproj" />
   </Folder>
 </Solution>

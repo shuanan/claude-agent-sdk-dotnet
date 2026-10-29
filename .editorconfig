@@ -21,14 +21,27 @@ dotnet_diagnostic.IDE0130.severity = warning
 # using 放在命名空間外，System 排最前面
 csharp_using_directive_placement = outside_namespace:warning
 dotnet_sort_system_directives_first = true
-# 私有欄位用 _camelCase
+# 私有欄位用 _camelCase；常數與 static readonly 欄位用 PascalCase（帶修飾詞的規則較具體，優先套用）
+dotnet_naming_rule.constant_fields.symbols = constant_fields
+dotnet_naming_rule.constant_fields.style = pascal_case
+dotnet_naming_rule.constant_fields.severity = warning
+dotnet_naming_symbols.constant_fields.applicable_kinds = field
+dotnet_naming_symbols.constant_fields.required_modifiers = const
+dotnet_naming_rule.static_readonly_fields.symbols = static_readonly_fields
+dotnet_naming_rule.static_readonly_fields.style = pascal_case
+dotnet_naming_rule.static_readonly_fields.severity = warning
+dotnet_naming_symbols.static_readonly_fields.applicable_kinds = field
+dotnet_naming_symbols.static_readonly_fields.required_modifiers = static, readonly
 dotnet_naming_rule.private_fields.symbols = private_fields
 dotnet_naming_rule.private_fields.style = underscore_camel
 dotnet_naming_rule.private_fields.severity = warning
 dotnet_naming_symbols.private_fields.applicable_kinds = field
 dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.pascal_case.capitalization = pascal_case
 dotnet_naming_style.underscore_camel.capitalization = camel_case
 dotnet_naming_style.underscore_camel.required_prefix = _
+# 命名規則在命令列建置時也檢查，不只在 IDE 裡
+dotnet_diagnostic.IDE1006.severity = warning
 
 [tests/**.cs]
 # 測試方法名稱用 Method_Scenario_Expected，允許底線

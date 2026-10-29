@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\PamisWang.ClaudeAgentSdk\PamisWang.ClaudeAgentSdk.csproj" />
+    <!-- 假的 CLI：參考 Exe 專案時，它的執行檔與 runtimeconfig 會一起複製到測試的輸出目錄 -->
+    <ProjectReference Include="..\PamisWang.ClaudeAgentSdk.FakeCli\PamisWang.ClaudeAgentSdk.FakeCli.csproj" />
   </ItemGroup>
 
 </Project>
