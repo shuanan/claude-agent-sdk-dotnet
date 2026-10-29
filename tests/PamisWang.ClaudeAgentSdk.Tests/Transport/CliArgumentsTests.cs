@@ -1,3 +1,4 @@
+using PamisWang.ClaudeAgentSdk.Permissions;
 using PamisWang.ClaudeAgentSdk.Transport;
 
 namespace PamisWang.ClaudeAgentSdk.Tests.Transport;
@@ -34,6 +35,30 @@ public sealed class CliArgumentsTests
                 "--model", "haiku",
                 "--resume=34953276-f9da-4b8c-a789-77d8ee05bc37",
                 "--include-partial-messages",
+                "--input-format", "stream-json",
+            ],
+            args);
+    }
+
+    [Fact]
+    public void Build_WithCanUseTool_RoutesPermissionPromptsOverStdio()
+    {
+        var options = new ClaudeAgentOptions
+        {
+            Model = "haiku",
+            Resume = "abc",
+            CanUseTool = (_, _) => Task.FromResult<PermissionResult>(new PermissionResultAllow()),
+        };
+
+        var args = CliArguments.Build(options, isWindows: false);
+
+        // 跟 Python SDK 一樣排在 --model 之後、--resume 之前
+        Assert.Equal(
+            [
+                "--output-format", "stream-json", "--verbose", "--system-prompt", "",
+                "--model", "haiku",
+                "--permission-prompt-tool", "stdio",
+                "--resume=abc",
                 "--input-format", "stream-json",
             ],
             args);

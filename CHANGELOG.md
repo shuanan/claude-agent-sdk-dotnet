@@ -10,3 +10,8 @@
 - 公開型別：`ClaudeAgentOptions`（`CliPath`、`Cwd`、`Model`、`Resume`、`IncludePartialMessages`、`DisallowedTools`、
   `Env`、`Stderr`、`MaxBufferSize`）與例外階層（`ClaudeAgentException`、`CliConnectionException`、`CliNotFoundException`、
   `CliProcessException`、`CliJsonDecodeException`）。
+- 協定層（內部）：initialize 握手；讀取迴圈把 control 協定與一般訊息分開，濾掉 `sdk_host_only` 的 session state；
+  送出 control request 並等回應（逾時、錯誤回應、輸出結束時立刻失敗）；回覆權限詢問時另開工作，不擋讀取迴圈，
+  CLI 撤回詢問時取消回呼且不回覆；中斷；送出使用者訊息。
+- 權限：`ClaudeAgentOptions.CanUseTool`，以及 `Permissions` 命名空間的 `ToolPermissionRequest`、
+  `PermissionResult`（`PermissionResultAllow`、`PermissionResultDeny`）、`PermissionUpdate`、`PermissionRuleValue`。
