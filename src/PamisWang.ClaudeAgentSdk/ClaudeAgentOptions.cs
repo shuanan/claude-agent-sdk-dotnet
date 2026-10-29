@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using PamisWang.ClaudeAgentSdk.Permissions;
 
 namespace PamisWang.ClaudeAgentSdk;
 
@@ -29,6 +30,12 @@ public sealed class ClaudeAgentOptions
 
     /// <summary>停用的工具名稱（<c>--disallowedTools</c>）。</summary>
     public IReadOnlyList<string> DisallowedTools { get; init; } = [];
+
+    /// <summary>
+    /// 工具要執行前、需要使用者批准時呼叫。設定之後 CLI 改用 control 協定詢問（<c>--permission-prompt-tool stdio</c>）。
+    /// 等待期間 CLI 撤回詢問（例如這一輪被中斷），<see cref="CancellationToken"/> 會被取消，這時回傳什麼都不會送出。
+    /// </summary>
+    public Func<ToolPermissionRequest, CancellationToken, Task<PermissionResult>>? CanUseTool { get; init; }
 
     /// <summary>額外的環境變數，蓋過繼承自目前程序的同名變數。</summary>
     public IReadOnlyDictionary<string, string> Env { get; init; } = ReadOnlyDictionary<string, string>.Empty;

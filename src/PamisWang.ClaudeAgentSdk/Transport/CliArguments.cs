@@ -28,6 +28,12 @@ internal static class CliArguments
             args.AddRange(["--model", options.Model]);
         }
 
+        if (options.CanUseTool is not null)
+        {
+            // 權限詢問改走 stdin／stdout 的 control 協定，由 CanUseTool 回覆
+            args.AddRange(["--permission-prompt-tool", "stdio"]);
+        }
+
         if (!string.IsNullOrEmpty(options.Resume))
         {
             if (isWindows)
