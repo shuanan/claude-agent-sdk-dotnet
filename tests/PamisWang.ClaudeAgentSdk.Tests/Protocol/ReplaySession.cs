@@ -18,9 +18,7 @@ internal sealed class ReplaySession : IAsyncDisposable
         Transport = transport;
         Protocol = protocol;
         _messages = protocol.ReceiveMessagesAsync().GetAsyncEnumerator();
-        _userMessages = new(fixture.Entries
-            .Where(entry => entry.Direction == "send" && entry.Data.GetProperty("type").GetString() == "user")
-            .Select(entry => entry.Data.GetProperty("message").GetProperty("content").GetString()!));
+        _userMessages = new(fixture.UserPrompts);
     }
 
     public ProtocolFixture Fixture { get; }

@@ -10,9 +10,9 @@ A .NET client for Claude Code: it launches the local `claude` CLI and talks to i
 
 ## 狀態 / Status
 
-開發中，還不能用。
+第一版的功能都完成了，還沒發佈到 NuGet。
 
-Work in progress; not usable yet.
+The first-release features are done; not yet published to NuGet.
 
 | 對照 / Tracks | 版本 / Version |
 |---|---|
@@ -20,9 +20,65 @@ Work in progress; not usable yet.
 | Claude Code CLI | 2.1.312（Python SDK v0.2.174 打包的版本 / bundled with Python SDK v0.2.174） |
 | 錄協定樣本用的 CLI / CLI used to record protocol fixtures | 2.1.309 |
 
+## 使用方式 / Usage
+
+```csharp
+using PamisWang.ClaudeAgentSdk;
+using PamisWang.ClaudeAgentSdk.Messages;
+using PamisWang.ClaudeAgentSdk.Permissions;
+
+var options = new ClaudeAgentOptions
+{
+    Cwd = @"D:\work\my-project",
+    Resume = null,                        // 接續舊 session 時填 session ID / a session ID to resume
+    IncludePartialMessages = true,        // 逐段收到輸出 / receive output as it streams
+    DisallowedTools = ["AskUserQuestion"],
+    // 工具要執行前詢問；中斷時 cancellationToken 會被取消 / asked before a tool runs; cancelled on interrupt
+    CanUseTool = async (request, cancellationToken) =>
+        await AskUserAsync(request.ToolName, request.Input, cancellationToken)
+            ? new PermissionResultAllow(UpdatedPermissions: request.Suggestions) // 一律允許 / always allow
+            : new PermissionResultDeny("使用者拒絕了 / denied by the user"),
+};
+
+await using var client = new ClaudeAgentClient(options);
+await client.ConnectAsync();
+await client.SendAsync("這個專案在做什麼？");
+
+await foreach (var message in client.ReceiveResponseAsync())
+{
+    switch (message)
+    {
+        case StreamEvent { TextDelta: { } delta }:
+            Console.Write(delta);
+            break;
+        case AssistantMessage assistant:
+            foreach (var tool in assistant.Content.OfType<ToolUseBlock>())
+            {
+                Console.WriteLine($"\n[{tool.Name}]");
+            }
+
+            break;
+        case ResultMessage result:
+            Console.WriteLine($"\n{result.Subtype}，{result.DurationMs} ms");
+            break;
+    }
+}
+
+// 接著說下一句，或中斷這一輪 / keep talking, or interrupt the current turn
+await client.SendAsync("那測試怎麼跑？");
+await client.InterruptAsync();
+```
+
+- `ReceiveResponseAsync` 讀到這一輪的 `ResultMessage` 為止；`ReceiveMessagesAsync` 跨越多輪一直讀，適合在背景持續接收。
+  `ReceiveResponseAsync` stops after the turn's `ResultMessage`; `ReceiveMessagesAsync` keeps reading across turns, which suits a background receive loop.
+- 每則訊息都有 `Raw`（原始 JSON），沒有對應屬性的欄位從這裡讀；不認得的訊息型別是 `UnknownMessage`，不會被丟掉。
+  Every message carries `Raw` (the original JSON) for fields without a property; unrecognized message types arrive as `UnknownMessage` instead of being dropped.
+- 一個 client 只連線一次；要重新開始就建立新的 client，用 `Resume` 接續原本的 session。
+  A client connects once; to start over, create a new client and use `Resume` to continue the session.
+
 ## 第一版的範圍 / Scope of the first release
 
-要做 / Planned:
+支援 / Supported:
 
 - 多輪對話（stream-json 輸入） / Multi-turn conversations (stream-json input)
 - 接續 session（`--resume`） / Resuming sessions (`--resume`)
