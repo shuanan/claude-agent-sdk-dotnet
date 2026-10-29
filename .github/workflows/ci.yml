@@ -1,0 +1,29 @@
+# 每次推到 main 或開 PR：在三個平台建置並跑全部測試。
+# 測試不需要真的 Claude Code：協定以錄下的樣本重播，子程序測試用 tests/ 裡的假 CLI。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - run: dotnet build PamisWang.ClaudeAgentSdk.slnx -c Release
+
+      - run: dotnet test PamisWang.ClaudeAgentSdk.slnx -c Release --no-build

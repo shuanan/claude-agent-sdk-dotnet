@@ -26,7 +26,11 @@ public sealed class SubprocessTransportTests : IDisposable
         Assert.Equal(
             CliArguments.Build(options, OperatingSystem.IsWindows()),
             report.GetProperty("argv").EnumerateArray().Select(arg => arg.GetString()));
-        Assert.Equal(Normalize(_cwd.Path), Normalize(report.GetProperty("cwd").GetString()!));
+        // macOS 的暫存資料夾經過符號連結（/var → /private/var），子程序看到的是解析後的路徑，只比對資料夾名稱
+        Assert.EndsWith(
+            Path.GetFileName(_cwd.Path),
+            Path.TrimEndingDirectorySeparator(report.GetProperty("cwd").GetString()!),
+            StringComparison.OrdinalIgnoreCase);
         var env = report.GetProperty("env");
         Assert.Equal("sdk-py", env.GetProperty("CLAUDE_CODE_ENTRYPOINT").GetString());
         Assert.Equal("0.2.174", env.GetProperty("CLAUDE_AGENT_SDK_VERSION").GetString());
@@ -229,9 +233,6 @@ public sealed class SubprocessTransportTests : IDisposable
 
         return messages;
     }
-
-    private static string Normalize(string path) =>
-        Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)).ToUpperInvariant();
 
     private static bool HasExited(int processId)
     {

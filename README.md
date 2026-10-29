@@ -97,6 +97,6 @@ await client.InterruptAsync();
 
 ## 授權 / License
 
-MIT，見 [LICENSE](LICENSE)；移植來源的授權聲明見 [NOTICE](NOTICE)。
+MIT，見 [LICENSE](https://github.com/pamis-wang/claude-agent-sdk-dotnet/blob/main/LICENSE)；移植來源的授權聲明見 [NOTICE](https://github.com/pamis-wang/claude-agent-sdk-dotnet/blob/main/NOTICE)。
 
-MIT, see [LICENSE](LICENSE). The license notice of the ported source is in [NOTICE](NOTICE).
+MIT, see [LICENSE](https://github.com/pamis-wang/claude-agent-sdk-dotnet/blob/main/LICENSE). The license notice of the ported source is in [NOTICE](https://github.com/pamis-wang/claude-agent-sdk-dotnet/blob/main/NOTICE).
