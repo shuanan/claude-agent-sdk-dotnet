@@ -1,5 +1,19 @@
 # Changelog
 
+## 未發佈 / Unreleased
+
+- SDK MCP server（在這個程序裡跑的 MCP 工具），對應 Python 的 `@tool`、`create_sdk_mcp_server()`：
+  `SdkMcpTool.Create`、`McpSchema.Parameters`（名稱對型別的 schema 簡寫）、`McpToolResult`（`Text`／`Error`）與內容型別、
+  `McpToolAnnotations`（含 `MaxResultSizeChars` → `_meta`）、`SdkMcpServer.Create` → `McpSdkServerConfig`。
+  放進 `McpServers` 時 CLI 只拿到 `{"type":"sdk","name":…}`；control 協定的 `mcp_message` 回答
+  `initialize`、`ping`、`tools/list`、`tools/call`、通知與 `notifications/cancelled`，回應包在 `{"mcp_response": …}`。
+  回應以 Python SDK 搭配 mcp 2.3.0 實際錄下的為準（`SdkMcpGoldenParityTests` 逐則比對）：capabilities 只有 `tools`、
+  沒處理的方法回 -32601 並在 `data` 帶方法名稱、握手前的 `tools/*` 回 -32602。
+  跟 Python 不同的地方：參數驗證只實作常用的 JSON Schema 關鍵字（沒有 `$ref`、`format`）；
+  不能像 Python 那樣放自己組的 MCP `Server`，也沒有 server 停掉後重新握手的流程。
+- `ClaudeAgent.QueryAsync`：有 SDK MCP server 時也留著 stdin 到第一個結果（對應 Python 的 `_has_bidirectional_needs`）。
+- `tools/local-ci.sh`：在本機跑跟 CI 一樣的建置、測試與打包。
+
 ## 0.1.0-preview.3（2026-10-31）
 
 - 函式庫沒有變更。git 歷史改寫過（協定樣本去識別化），重新發佈讓套件記錄的 commit 對應到現在的歷史；

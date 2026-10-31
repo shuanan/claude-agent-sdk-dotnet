@@ -1,16 +1,18 @@
 using System.Collections.Concurrent;
+using System.Collections.ObjectModel;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using PamisWang.ClaudeAgentSdk.Mcp;
 using PamisWang.ClaudeAgentSdk.Permissions;
 using PamisWang.ClaudeAgentSdk.Transport;
 
 namespace PamisWang.ClaudeAgentSdk.Protocol;
 
 /// <summary>
-/// 在 transport 上跑 control 協定：初始化握手、讀取迴圈分流、回覆 CLI 的權限詢問、送出中斷、換模型與套用設定。
+/// 在 transport 上跑 control 協定：初始化握手、讀取迴圈分流、回覆 CLI 的權限詢問與 SDK MCP server 的訊息、送出中斷、換模型與套用設定。
 /// 對應 Python SDK 的 <c>Query</c> 裡互動式 client 用到的部分；
 /// 一次性 <c>query()</c> 用來判斷何時關 stdin 的 run 生命週期（session state、上限計時）不在這裡，互動式的 stdin 只在關閉時才關。
 /// </summary>
@@ -23,6 +25,9 @@ internal sealed class ControlProtocol : IAsyncDisposable
 
     private readonly ITransport _transport;
     private readonly Func<ToolPermissionRequest, CancellationToken, Task<PermissionResult>>? _canUseTool;
+
+    // SDK MCP server，鍵是 McpServers 的鍵，也就是 CLI 在 mcp_message 的 server_name 裡用的名字
+    private readonly Dictionary<string, SdkMcpServerSession> _sdkMcpServers = [];
 
     // 一般訊息交給上層。不設上限：讀取迴圈若因為上層沒在讀而停住，control 回應也會跟著收不到，
     // 例如上層一邊等 interrupt 的回應、一邊沒在讀訊息，就會互等
@@ -46,11 +51,27 @@ internal sealed class ControlProtocol : IAsyncDisposable
 
     public ControlProtocol(
         ITransport transport,
-        Func<ToolPermissionRequest, CancellationToken, Task<PermissionResult>>? canUseTool)
+        Func<ToolPermissionRequest, CancellationToken, Task<PermissionResult>>? canUseTool,
+        IReadOnlyDictionary<string, McpServerConfig>? mcpServers = null)
     {
         _transport = transport;
         _canUseTool = canUseTool;
+
+        // 對應 Python client 從 mcp_servers 挑出 type 是 sdk 的那些，交給 Query 建 bridge
+        foreach (var (name, config) in mcpServers ?? ReadOnlyDictionary<string, McpServerConfig>.Empty)
+        {
+            if (config is McpSdkServerConfig sdkServer)
+            {
+                _sdkMcpServers[name] = new SdkMcpServerSession(sdkServer);
+            }
+        }
     }
+
+    /// <summary>
+    /// CLI 可能還會送來要回覆的 control request：有 SDK MCP server 或權限回呼。這時一次性的 query 要等結果才能關 stdin。
+    /// 對應 Python 的 <c>_has_bidirectional_needs</c>（hook 這裡還沒有）。
+    /// </summary>
+    public bool HasBidirectionalNeeds => _sdkMcpServers.Count > 0 || _canUseTool is not null;
 
     /// <summary>關閉時等權限回呼收尾的時間上限。測試會調短。</summary>
     internal TimeSpan HandlerShutdownTimeout { get; init; } = TimeSpan.FromSeconds(5);
@@ -370,6 +391,9 @@ internal sealed class ControlProtocol : IAsyncDisposable
                     "can_use_tool" => ControlMessages.Success(
                         requestId,
                         await AnswerPermissionAsync(request, cancellationToken).ConfigureAwait(false)),
+                    "mcp_message" => ControlMessages.Success(
+                        requestId,
+                        await AnswerMcpMessageAsync(request, cancellationToken).ConfigureAwait(false)),
                     _ => throw new NotSupportedException($"不支援的 control request：{subtype}"),
                 };
             }
@@ -456,6 +480,55 @@ internal sealed class ControlProtocol : IAsyncDisposable
                 }
             },
             _ => throw new InvalidOperationException("CanUseTool 要回傳 PermissionResultAllow 或 PermissionResultDeny。"),
+        };
+    }
+
+    /// <summary>
+    /// 把 JSON-RPC 訊息交給 SDK MCP server，回傳寫出 <c>{"mcp_response": …}</c> 的方法。
+    /// 對應 Python 的 <c>_handle_control_request</c> 裡 mcp_message 的部分與 <c>_handle_sdk_mcp_request</c>。
+    /// </summary>
+    private async Task<Action<Utf8JsonWriter>> AnswerMcpMessageAsync(JsonElement request, CancellationToken cancellationToken)
+    {
+        // 跟 Python 的 not server_name or not mcp_message 一樣：空字串、空物件也算沒給
+        var serverName = GetString(request, "server_name");
+        if (string.IsNullOrEmpty(serverName)
+            || !request.TryGetProperty("message", out var message)
+            || message.ValueKind != JsonValueKind.Object
+            || !message.EnumerateObject().Any())
+        {
+            throw new InvalidOperationException("Missing server_name or message for MCP request");
+        }
+
+        var id = message.TryGetProperty("id", out var value) ? value : default;
+        string? response;
+        if (!_sdkMcpServers.TryGetValue(serverName, out var server))
+        {
+            response = SdkMcpServerSession.JsonRpcError(id, -32601, $"Server '{serverName}' not found");
+        }
+        else
+        {
+            try
+            {
+                response = await server.HandleAsync(message, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+#pragma warning disable CA1031 // 送不到 server 的訊息跟 Python 一樣回 JSON-RPC 錯誤，讓 CLI 只讓這個請求失敗
+            catch (Exception e)
+#pragma warning restore CA1031
+            {
+                response = SdkMcpServerSession.JsonRpcError(id, -32603, e.Message.Length > 0 ? e.Message : e.GetType().Name);
+            }
+        }
+
+        // 通知沒有 JSON-RPC 回覆，但帶著它的 control request 還是要回
+        response ??= """{"jsonrpc":"2.0","result":{}}""";
+        return writer =>
+        {
+            writer.WritePropertyName("mcp_response");
+            writer.WriteRawValue(response);
         };
     }
 

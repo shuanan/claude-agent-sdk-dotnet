@@ -306,6 +306,31 @@ public sealed class CliArgumentsParityTests : IDisposable
     }
 
     [Fact]
+    public void Build_McpServers_SdkServerWrittenWithoutInstanceMixedWithStdio()
+    {
+        var tool = SdkMcpTool.Create("add", "Add", McpSchema.Parameters(("a", typeof(double))), _ => ValueTask.FromResult(McpToolResult.Text("")));
+        var options = new ClaudeAgentOptions
+        {
+            McpServers = new Dictionary<string, McpServerConfig>
+            {
+                ["calc"] = SdkMcpServer.Create("calculator", "2.0.0", tool),
+                ["fs"] = new McpStdioServerConfig("npx") { Args = ["-y", "server-fs"] },
+            },
+        };
+
+        var args = Build(options);
+
+        Assert.Equal(
+            [
+                .. Head,
+                "--mcp-config",
+                """{"mcpServers":{"calc":{"type":"sdk","name":"calculator"},"fs":{"type":"stdio","command":"npx","args":["-y","server-fs"]}}}""",
+                .. Tail,
+            ],
+            args);
+    }
+
+    [Fact]
     public void Build_McpConfigString_PassesThrough()
     {
         Assert.Equal([.. Head, "--mcp-config", "/path/mcp.json", .. Tail], Build(new ClaudeAgentOptions { McpConfig = "/path/mcp.json" }));

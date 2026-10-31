@@ -96,6 +96,50 @@ await client.ApplyFlagSettingsAsync(new JsonObject { ["effortLevel"] = "max" });
 - 一個 client 只連線一次；要重新開始就建立新的 client，用 `Resume` 接續原本的 session。
   A client connects once; to start over, create a new client and use `Resume` to continue the session.
 
+### SDK MCP 工具 / In-process MCP tools
+
+工具在你的程式裡執行，不另外開程序；對應 Python 的 `@tool` 與 `create_sdk_mcp_server()`。
+Tools run inside your process, with no extra server process; this mirrors Python's `@tool` and `create_sdk_mcp_server()`.
+
+```csharp
+using PamisWang.ClaudeAgentSdk;
+using PamisWang.ClaudeAgentSdk.Mcp;
+using PamisWang.ClaudeAgentSdk.Messages;
+
+var add = SdkMcpTool.Create(
+    "add",
+    "把兩個數字相加 / Add two numbers",
+    McpSchema.Parameters(("a", typeof(double)), ("b", typeof(double))), // {"type":"object",…,"required":["a","b"]}
+    args => ValueTask.FromResult(McpToolResult.Text(
+        $"{args.GetProperty("a").GetDouble() + args.GetProperty("b").GetDouble()}")));
+
+var options = new ClaudeAgentOptions
+{
+    McpServers = new Dictionary<string, McpServerConfig>
+    {
+        ["calc"] = SdkMcpServer.Create("calculator", add),            // 可以跟 stdio/SSE/HTTP 混用 / mixes with stdio/SSE/HTTP
+    },
+    AllowedTools = ["mcp__calc__add"],                                // mcp__<鍵/key>__<工具/tool>
+};
+
+await foreach (var message in ClaudeAgent.QueryAsync("1.5 加 2 是多少？", options))
+{
+    if (message is ResultMessage result)
+    {
+        Console.WriteLine(result.Result);
+    }
+}
+```
+
+- 工具的完整名稱是 `mcp__<McpServers 的鍵>__<工具名稱>`，上例是 `mcp__calc__add`；放進 `AllowedTools` 就不必詢問。
+  A tool's full name is `mcp__<McpServers key>__<tool name>` (`mcp__calc__add` above); list it in `AllowedTools` to skip the permission prompt.
+- 參數先用 `InputSchema` 驗證；參數不合格、找不到工具、處理函式丟出例外，都跟 Python 一樣回給 Claude 一個出錯的結果（`isError`），不讓請求失敗。要自己回報錯誤就用 `McpToolResult.Error("…")`。
+  Arguments are validated against `InputSchema` first; invalid arguments, unknown tools and exceptions thrown by a handler all come back to Claude as error results (`isError`), as in Python. Return `McpToolResult.Error("…")` to report a failure yourself.
+- 給 CLI 的 JSON-RPC 回應跟 Python SDK（搭配 mcp 2.3.0）逐則比對過；參數驗證只實作常用的 JSON Schema 關鍵字（`$ref`、`format` 不檢查）。
+  The JSON-RPC responses are checked against recordings of the Python SDK (with mcp 2.3.0); argument validation covers the common JSON Schema keywords only (`$ref` and `format` are not checked).
+- 有 SDK MCP server 時，`ClaudeAgent.QueryAsync` 會留著 stdin 到第一個 `ResultMessage` 才關，讓 CLI 在回合中呼叫工具。
+  With an SDK MCP server, `ClaudeAgent.QueryAsync` keeps stdin open until the first `ResultMessage` so the CLI can call the tools during the turn.
+
 ## 範圍 / Scope
 
 支援 / Supported:
@@ -110,9 +154,9 @@ await client.ApplyFlagSettingsAsync(new JsonObject { ["effortLevel"] = "max" });
 - 指定模型與思考深度（`--model`、`--effort`），對話中途換模型（`set_model`） / Choosing the model and effort (`--model`, `--effort`), and switching models mid-conversation (`set_model`)
 - 對話中途套用設定，例如換思考深度（`apply_flag_settings`；Python SDK 沒有，照 TypeScript SDK 的協定） / Applying settings mid-conversation, such as the effort level (`apply_flag_settings`; missing from the Python SDK, follows the TypeScript SDK's protocol)
 - 對話中途換權限模式（`SetPermissionModeAsync`）；一次性問答 `ClaudeAgent.QueryAsync`（對應 Python 的 `query()`） / Switching the permission mode mid-conversation (`SetPermissionModeAsync`); one-shot `ClaudeAgent.QueryAsync` (Python's `query()`)
-- 跟 Python 一樣的其他選項 / Further options matching Python: `Tools`, `AllowedTools`, `MaxTurns`, `MaxBudgetUsd`, `FallbackModel`, `Betas`, `PermissionPromptToolName`, `PermissionMode`, `ContinueConversation`, `SessionId`, `Settings` + `Sandbox`, `AddDirs`, `McpServers`（外部的 stdio/SSE/HTTP / external stdio/SSE/HTTP）/ `McpConfig`, `StrictMcpConfig`, `ForkSession`, `SettingSources`, `Plugins`, `ExtraArgs`, `Thinking` / `MaxThinkingTokens`, `OutputFormat`, `Agents`
+- 跟 Python 一樣的其他選項 / Further options matching Python: `Tools`, `AllowedTools`, `MaxTurns`, `MaxBudgetUsd`, `FallbackModel`, `Betas`, `PermissionPromptToolName`, `PermissionMode`, `ContinueConversation`, `SessionId`, `Settings` + `Sandbox`, `AddDirs`, `McpServers`（外部的 stdio/SSE/HTTP，以及 SDK MCP server / external stdio/SSE/HTTP, plus in-process SDK MCP servers）/ `McpConfig`, `StrictMcpConfig`, `ForkSession`, `SettingSources`, `Plugins`, `ExtraArgs`, `Thinking` / `MaxThinkingTokens`, `OutputFormat`, `Agents`
 
-不做 / Not planned: hook 回呼、SDK 內的 MCP server、session store、transcript mirror / hook callbacks, in-SDK MCP servers, session stores, transcript mirroring.
+不做 / Not planned: hook 回呼、session store、transcript mirror / hook callbacks, session stores, transcript mirroring.
 
 ## 需求 / Requirements
 

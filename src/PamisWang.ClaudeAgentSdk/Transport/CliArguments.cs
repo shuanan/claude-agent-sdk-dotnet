@@ -142,8 +142,7 @@ internal static class CliArguments
             args.AddRange(["--add-dir", directory]);
         }
 
-        // SDK 內的 MCP server 之後也從 McpServers 進來：Python 送出時拿掉 instance，只留 type 與 name，
-        // 由 McpServerConfig.WriteTo 決定寫什麼，這裡不用改
+        // SDK MCP server 跟外部的混在一起送：跟 Python 一樣拿掉 instance，只留 type 與 name（McpSdkServerConfig.WriteTo）
         if (options.McpServers.Count > 0)
         {
             args.AddRange(["--mcp-config", JsonWriting.ToCompactString(writer =>
