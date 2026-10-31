@@ -40,6 +40,12 @@ internal static class CliEnvironment
             environment["CLAUDE_CODE_SDK_READS_SESSION_STATE"] = "1";
         }
 
+        // 跟 Python 一樣在 Env 之後設：開了 EnableFileCheckpointing 就一定是 true
+        if (options.EnableFileCheckpointing)
+        {
+            environment["CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING"] = "true";
+        }
+
         if (options.Cwd is not null)
         {
             environment["PWD"] = options.Cwd;

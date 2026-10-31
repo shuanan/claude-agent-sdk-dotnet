@@ -137,7 +137,7 @@ await foreach (var message in ClaudeAgent.QueryAsync("1.5 加 2 是多少？", o
   Arguments are validated against `InputSchema` first; invalid arguments, unknown tools and exceptions thrown by a handler all come back to Claude as error results (`isError`), as in Python. Return `McpToolResult.Error("…")` to report a failure yourself.
 - 給 CLI 的 JSON-RPC 回應跟 Python SDK（搭配 mcp 2.3.0）逐則比對過；參數驗證只實作常用的 JSON Schema 關鍵字（`$ref`、`format` 不檢查）。
   The JSON-RPC responses are checked against recordings of the Python SDK (with mcp 2.3.0); argument validation covers the common JSON Schema keywords only (`$ref` and `format` are not checked).
-- 有 SDK MCP server 時，`ClaudeAgent.QueryAsync` 會留著 stdin 到第一個 `ResultMessage` 才關，讓 CLI 在回合中呼叫工具。
+- 有 SDK MCP server 時，`ClaudeAgent.QueryAsync` 跟 Python 一樣留著 stdin 到整個 run 結束（CLI 回報 idle、背景 agent 都結束）才關，讓 CLI 在回合中呼叫工具。
   With an SDK MCP server, `ClaudeAgent.QueryAsync` keeps stdin open until the first `ResultMessage` so the CLI can call the tools during the turn.
 
 ### Hook
@@ -181,7 +181,7 @@ var options = new ClaudeAgentOptions
   Results: `SyncHookOutput`, `AsyncHookOutput` (`{"async": true}`), or `RawHookOutput` for hand-built JSON. An exception thrown by a callback becomes an error response to the CLI.
 - 同一個事件的多個 matcher 會被 CLI 同時觸發，回呼可能同時在跑；CLI 撤回時 `CancellationToken` 會被取消，不送回應。
   The CLI fires all matchers of one event concurrently, so callbacks may run in parallel; when the CLI withdraws a call the `CancellationToken` is cancelled and no response is sent.
-- initialize 送出的設定與每種回應都跟 Python SDK 實際的輸出比對過（`HookGoldenParityTests`）。有 hook 時 `ClaudeAgent.QueryAsync` 一樣留著 stdin 到第一個結果。
+- initialize 送出的設定與每種回應都跟 Python SDK 實際的輸出比對過（`HookGoldenParityTests`）。有 hook 時 `ClaudeAgent.QueryAsync` 一樣留著 stdin 到 run 結束。
   The initialize payload and every response are checked against the real Python SDK (`HookGoldenParityTests`). With hooks, `ClaudeAgent.QueryAsync` keeps stdin open until the first result.
 
 ## 範圍 / Scope
@@ -198,8 +198,12 @@ var options = new ClaudeAgentOptions
 - 指定模型與思考深度（`--model`、`--effort`），對話中途換模型（`set_model`） / Choosing the model and effort (`--model`, `--effort`), and switching models mid-conversation (`set_model`)
 - 對話中途套用設定，例如換思考深度（`apply_flag_settings`；Python SDK 沒有，照 TypeScript SDK 的協定） / Applying settings mid-conversation, such as the effort level (`apply_flag_settings`; missing from the Python SDK, follows the TypeScript SDK's protocol)
 - 對話中途換權限模式（`SetPermissionModeAsync`）；一次性問答 `ClaudeAgent.QueryAsync`（對應 Python 的 `query()`） / Switching the permission mode mid-conversation (`SetPermissionModeAsync`); one-shot `ClaudeAgent.QueryAsync` (Python's `query()`)
-- 跟 Python 一樣的其他選項 / Further options matching Python: `Tools`, `AllowedTools`, `MaxTurns`, `MaxBudgetUsd`, `FallbackModel`, `Betas`, `PermissionPromptToolName`, `PermissionMode`, `ContinueConversation`, `SessionId`, `Settings` + `Sandbox`, `AddDirs`, `McpServers`（外部的 stdio/SSE/HTTP，以及 SDK MCP server / external stdio/SSE/HTTP, plus in-process SDK MCP servers）/ `McpConfig`, `StrictMcpConfig`, `ForkSession`, `SettingSources`, `Plugins`, `ExtraArgs`, `Thinking` / `MaxThinkingTokens`, `OutputFormat`, `Agents`
+- 跟 Python 一樣的其他選項 / Further options matching Python: `Tools`, `AllowedTools`, `MaxTurns`, `MaxBudgetUsd`, `FallbackModel`, `Betas`, `PermissionPromptToolName`, `PermissionMode`, `ContinueConversation`, `SessionId`, `Settings` + `Sandbox`, `AddDirs`, `McpServers`（外部的 stdio/SSE/HTTP，以及 SDK MCP server / external stdio/SSE/HTTP, plus in-process SDK MCP servers）/ `McpConfig`, `StrictMcpConfig`, `ForkSession`, `SettingSources`, `Plugins`, `ExtraArgs`, `Thinking` / `MaxThinkingTokens`, `OutputFormat`, `Agents`,
+  `Skills`, `TaskBudget`, `IncludeHookEvents`, `ResumeSessionAt` / `ResumeDropsTurn`, `ForwardSubagentText`, `VerbatimPrompts`,
+  `EnableFileCheckpointing`, `User`（Windows 不支援 / not supported on Windows）, `SystemPromptPreset.ExcludeDynamicSections` / `Snapshot`
 - Hook 回呼（`Hooks`），所有 Python 有的事件輸入與事件專屬結果 / Hook callbacks (`Hooks`) with every hook input and hook-specific output type Python has
+- 對話中的控制 / In-session controls: `RewindFilesAsync`, `ReconnectMcpServerAsync`, `ToggleMcpServerAsync`, `StopTaskAsync`, `GetMcpStatusAsync`, `GetContextUsageAsync`, `GetServerInfoAsync`
+- 連線前檢查 CLI 版本，太舊時經由 `Warning` 警告（`CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK` 跳過） / CLI version check before connecting, warning through `Warning` (skip with `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK`)
 
 不做 / Not planned: session store、transcript mirror / session stores, transcript mirroring.
 

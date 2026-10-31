@@ -45,11 +45,11 @@ internal sealed class SubprocessTransport : ITransport
 
     public bool IsReady => _ready;
 
-    public Task ConnectAsync(CancellationToken cancellationToken = default)
+    public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
         if (_process is not null)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         var cliPath = _locator.Find(_options.CliPath);
@@ -58,6 +58,18 @@ internal sealed class SubprocessTransport : ITransport
         if (_options.Cwd is not null && !Directory.Exists(_options.Cwd))
         {
             throw new CliConnectionException($"工作目錄不存在：{_options.Cwd}");
+        }
+
+        if (_options.User is not null && OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException(
+                "ClaudeAgentOptions.User 在 Windows 上不支援：用另一個使用者的身分啟動程序需要那個帳號的密碼。Python SDK 的 user 也只在 POSIX 有效。");
+        }
+
+        // 跟 Python 一樣在組參數、啟動之前檢查版本；檢查本身不會失敗
+        if (!CliVersionCheck.IsSkipped(Environment.GetEnvironmentVariable(CliVersionCheck.SkipEnvironmentVariable)))
+        {
+            await CliVersionCheck.RunAsync(cliPath, _options, cancellationToken).ConfigureAwait(false);
         }
 
         var startInfo = new ProcessStartInfo(cliPath)
@@ -85,6 +97,12 @@ internal sealed class SubprocessTransport : ITransport
 
         CliEnvironment.Apply(startInfo.Environment, _options);
 
+        // 對應 Python 的 open_process(user=…)：.NET 在 Unix 上會在子程序裡切換 uid、gid
+        if (_options.User is { } user)
+        {
+            startInfo.UserName = user;
+        }
+
         Process process;
         try
         {
@@ -111,7 +129,6 @@ internal sealed class SubprocessTransport : ITransport
         }
 
         _ready = true;
-        return Task.CompletedTask;
     }
 
     public async Task WriteAsync(string data, CancellationToken cancellationToken = default)

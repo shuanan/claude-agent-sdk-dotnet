@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using PamisWang.ClaudeAgentSdk.Mcp;
 using PamisWang.ClaudeAgentSdk.Messages;
 using PamisWang.ClaudeAgentSdk.Protocol;
 using PamisWang.ClaudeAgentSdk.Transport;
@@ -101,7 +102,12 @@ public sealed class ClaudeAgentClient : IAsyncDisposable
 
         // SDK MCP server 跟 Python 一樣從 McpServers 挑出來；CLI 的 mcp_message 由 protocol 交給它們。
         // hook 在 initialize 時登記，CLI 的 hook_callback 也由 protocol 交給回呼
-        var protocol = new ControlProtocol(_transport, _options.CanUseTool, _options.McpServers, _options.Hooks);
+        // VerbatimPrompts 跟 Python 一樣在連線時讀一次，之後每一句話都照它標記
+        var protocol = new ControlProtocol(_transport, _options.CanUseTool, _options.McpServers, _options.Hooks)
+        {
+            VerbatimPrompts = _options.VerbatimPrompts,
+            RunEndCeilingMs = RunEndCeiling.FromEnvironment(_options.Env, Environment.GetEnvironmentVariable),
+        };
         try
         {
             await _transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
@@ -109,7 +115,7 @@ public sealed class ClaudeAgentClient : IAsyncDisposable
             ServerInfo = await protocol
                 .InitializeAsync(
                     InitializeTimeout(Environment.GetEnvironmentVariable("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT")),
-                    _options.Agents,
+                    InitializeSettings.FromOptions(_options),
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -155,13 +161,10 @@ public sealed class ClaudeAgentClient : IAsyncDisposable
         RequireProtocol().SendUserMessageAsync(prompt, sessionId, cancellationToken);
 
     /// <summary>
-    /// CLI 還可能送來要回覆的 control request（有 SDK MCP server、<see cref="ClaudeAgentOptions.Hooks"/> 或 <see cref="ClaudeAgentOptions.CanUseTool"/>），stdin 要留著。
+    /// 在背景等 run 結束再關 stdin（一次性 <see cref="ClaudeAgent.QueryAsync"/> 用）。對應 Python 的 <c>wait_for_result_and_end_input</c>，
+    /// 規則見 <see cref="ControlProtocol.StartWaitForResultAndEndInput"/>。
     /// </summary>
-    internal bool HasBidirectionalNeeds => RequireProtocol().HasBidirectionalNeeds;
-
-    /// <summary>關閉 stdin，告訴 CLI 不會再有輸入。</summary>
-    internal Task EndInputAsync(CancellationToken cancellationToken) =>
-        RequireProtocol().EndInputAsync(cancellationToken);
+    internal void StartWaitForResultAndEndInput() => RequireProtocol().StartWaitForResultAndEndInput();
 
     /// <summary>
     /// 讀取 CLI 送來的每一則訊息，跨越多輪，直到 CLI 結束或 client 關閉。
@@ -230,6 +233,85 @@ public sealed class ClaudeAgentClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(settings);
         return RequireProtocol().ApplyFlagSettingsAsync(settings, cancellationToken);
     }
+
+    /// <summary>
+    /// 把檔案還原到 <paramref name="userMessageId"/> 那則使用者訊息時的狀態（<c>rewind_files</c>）。對應 Python 的 <c>rewind_files()</c>。
+    /// 要開 <see cref="ClaudeAgentOptions.EnableFileCheckpointing"/> 才會記錄檔案的變更；ID 是收到的 <see cref="UserMessage"/> 的 <see cref="ClaudeMessage.Uuid"/>，
+    /// 要 CLI 把使用者訊息重播回來，跟 Python 一樣另外設 <c>ExtraArgs = { ["replay-user-messages"] = null }</c>。
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// var options = new ClaudeAgentOptions
+    /// {
+    ///     EnableFileCheckpointing = true,
+    ///     ExtraArgs = new Dictionary&lt;string, string?&gt; { ["replay-user-messages"] = null },
+    /// };
+    /// await using var client = new ClaudeAgentClient(options);
+    /// await client.ConnectAsync();
+    /// await client.SendAsync("改一下我的檔案");
+    /// string? checkpoint = null;
+    /// await foreach (var message in client.ReceiveResponseAsync())
+    /// {
+    ///     if (message is UserMessage { Uuid: { } uuid })
+    ///     {
+    ///         checkpoint ??= uuid;
+    ///     }
+    /// }
+    ///
+    /// await client.RewindFilesAsync(checkpoint!);
+    /// </code>
+    /// </example>
+    /// <exception cref="ClaudeAgentException">CLI 回報還原失敗。</exception>
+    public Task RewindFilesAsync(string userMessageId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(userMessageId);
+        return RequireProtocol().RewindFilesAsync(userMessageId, cancellationToken);
+    }
+
+    /// <summary>重新連線斷掉或連不上的 MCP server（<c>mcp_reconnect</c>）。失敗時丟出例外。對應 Python 的 <c>reconnect_mcp_server()</c>。</summary>
+    /// <exception cref="ClaudeAgentException">CLI 回報重新連線失敗。</exception>
+    public Task ReconnectMcpServerAsync(string serverName, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(serverName);
+        return RequireProtocol().ReconnectMcpServerAsync(serverName, cancellationToken);
+    }
+
+    /// <summary>
+    /// 開啟或停用 MCP server（<c>mcp_toggle</c>）：停用會斷線並拿掉它的工具，開啟會重新連線、工具也回來。失敗時丟出例外。
+    /// 對應 Python 的 <c>toggle_mcp_server()</c>。
+    /// </summary>
+    /// <exception cref="ClaudeAgentException">CLI 回報切換失敗。</exception>
+    public Task ToggleMcpServerAsync(string serverName, bool enabled, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(serverName);
+        return RequireProtocol().ToggleMcpServerAsync(serverName, enabled, cancellationToken);
+    }
+
+    /// <summary>
+    /// 停止背景工作（<c>stop_task</c>）；ID 是 <c>task_started</c> 系統訊息的 <c>task_id</c>。對應 Python 的 <c>stop_task()</c>。
+    /// 完成後 CLI 會送來 <c>task_updated</c>，<c>patch.status</c> 是結束狀態（停止的工作是 <c>killed</c>）；
+    /// 也可能再送 <c>status</c> 是 <c>stopped</c> 的 <c>task_notification</c>，但有時不送，兩種都要用 <see cref="TaskLifecycle.TerminalStatuses"/> 判斷。
+    /// </summary>
+    public Task StopTaskAsync(string taskId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(taskId);
+        return RequireProtocol().StopTaskAsync(taskId, cancellationToken);
+    }
+
+    /// <summary>各 MCP server 目前的連線狀態（<c>mcp_status</c>）。對應 Python 的 <c>get_mcp_status()</c>。</summary>
+    public async Task<McpStatusResponse> GetMcpStatusAsync(CancellationToken cancellationToken = default) =>
+        McpStatusResponse.FromJson(await RequireProtocol().GetMcpStatusAsync(cancellationToken).ConfigureAwait(false));
+
+    /// <summary>context window 依類別的用量（<c>get_context_usage</c>），跟 CLI 的 <c>/context</c> 一樣。對應 Python 的 <c>get_context_usage()</c>。</summary>
+    public async Task<ContextUsageResponse> GetContextUsageAsync(CancellationToken cancellationToken = default) =>
+        ContextUsageResponse.FromJson(await RequireProtocol().GetContextUsageAsync(cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// 初始化握手時 CLI 回報的資訊（可用的指令、輸出風格等），連線時已經拿到，不會再問 CLI。對應 Python 的 <c>get_server_info()</c>：
+    /// 還沒連線時跟 Python 一樣丟出 <see cref="CliConnectionException"/>；不想處理例外時讀 <see cref="ServerInfo"/>，沒連線時是 <see langword="null"/>。
+    /// </summary>
+    /// <exception cref="CliConnectionException">還沒連線。</exception>
+    public Task<JsonElement?> GetServerInfoAsync() => Task.FromResult(RequireProtocol().InitializationResult);
 
     /// <summary>關閉：取消等待中的權限詢問、關閉 stdin 讓 CLI 寫完 session 後結束，逾時才強制結束。</summary>
     public async ValueTask DisposeAsync()

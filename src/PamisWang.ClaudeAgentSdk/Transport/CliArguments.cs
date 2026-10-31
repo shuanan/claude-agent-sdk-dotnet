@@ -16,9 +16,17 @@ internal static class CliArguments
     private const string CmdExeMetacharacters = "&|<>^%!\"\r\n";
     private static readonly SearchValues<char> CmdExeMetacharacterValues = SearchValues.Create(CmdExeMetacharacters);
 
+    // skill 名稱不能有的字元，跟 Python 的 _SKILL_NAME_INVALID_CHARS 一樣：括號與逗號是 --allowedTools 的分隔字元，
+    // 控制字元（C0、DEL、C1）不會出現在資料夾名稱裡；U+FEFF 是因為 CLI 把它當空白去掉
+    private static readonly SearchValues<char> SkillNameInvalidCharValues = SearchValues.Create(
+        string.Concat(
+            Enumerable.Range(0, 0x20).Concat(Enumerable.Range(0x7F, 0x21)).Append(0xFEFF).Select(code => (char)code)
+                .Concat("(),")));
+
     /// <summary>組出參數，不含執行檔本身。</summary>
     /// <exception cref="ArgumentException">
-    /// 選項互相衝突；或 Windows 上 <see cref="ClaudeAgentOptions.Resume"/>、<see cref="ClaudeAgentOptions.SessionId"/> 含有 cmd.exe 的特殊字元。
+    /// 選項互相衝突；<see cref="ClaudeAgentOptions.Skills"/> 的名稱不合規則；或 Windows 上 <see cref="ClaudeAgentOptions.Resume"/>、
+    /// <see cref="ClaudeAgentOptions.SessionId"/>、<see cref="ClaudeAgentOptions.ResumeSessionAt"/>、<see cref="ClaudeAgentOptions.ResumeDropsTurn"/> 含有 cmd.exe 的特殊字元。
     /// </exception>
     public static IReadOnlyList<string> Build(ClaudeAgentOptions options, bool isWindows)
     {
@@ -58,9 +66,10 @@ internal static class CliArguments
                 break;
         }
 
-        if (options.AllowedTools.Count > 0)
+        var (allowedTools, settingSources) = ApplySkillsDefaults(options);
+        if (allowedTools.Count > 0)
         {
-            args.AddRange(["--allowedTools", string.Join(',', options.AllowedTools)]);
+            args.AddRange(["--allowedTools", string.Join(',', allowedTools)]);
         }
 
         // Python 判斷的是真假值，0 跟沒指定一樣
@@ -77,6 +86,11 @@ internal static class CliArguments
         if (options.DisallowedTools.Count > 0)
         {
             args.AddRange(["--disallowedTools", string.Join(',', options.DisallowedTools)]);
+        }
+
+        if (options.TaskBudget is { } taskBudget)
+        {
+            args.AddRange(["--task-budget", taskBudget.Total.ToString(CultureInfo.InvariantCulture)]);
         }
 
         if (!string.IsNullOrEmpty(options.Model))
@@ -169,6 +183,11 @@ internal static class CliArguments
             args.Add("--include-partial-messages");
         }
 
+        if (options.IncludeHookEvents)
+        {
+            args.Add("--include-hook-events");
+        }
+
         if (options.StrictMcpConfig)
         {
             args.Add("--strict-mcp-config");
@@ -179,10 +198,32 @@ internal static class CliArguments
             args.Add("--fork-session");
         }
 
-        // 等號的寫法：空的清單也要帶，代表一個設定檔都不載入
-        if (options.SettingSources is not null)
+        // 跟 --resume 一樣寫成等號的形式，值永遠不會被當成另一個旗標
+        if (!string.IsNullOrEmpty(options.ResumeSessionAt))
         {
-            args.Add($"--setting-sources={string.Join(',', options.SettingSources)}");
+            if (isWindows)
+            {
+                RejectWindowsCmdMetacharacters(nameof(options.ResumeSessionAt), options.ResumeSessionAt);
+            }
+
+            args.Add($"--resume-session-at={options.ResumeSessionAt}");
+        }
+
+        // 判斷 null 而不是空字串：空字串也送，讓 CLI 當成格式錯誤拒絕，不要默默拿掉呼叫端以為有的檢查
+        if (options.ResumeDropsTurn is not null)
+        {
+            if (isWindows)
+            {
+                RejectWindowsCmdMetacharacters(nameof(options.ResumeDropsTurn), options.ResumeDropsTurn);
+            }
+
+            args.Add($"--resume-drops-turn={options.ResumeDropsTurn}");
+        }
+
+        // 等號的寫法：空的清單也要帶，代表一個設定檔都不載入
+        if (settingSources is not null)
+        {
+            args.Add($"--setting-sources={string.Join(',', settingSources)}");
         }
 
         foreach (var plugin in options.Plugins)
@@ -265,19 +306,142 @@ internal static class CliArguments
                 }
                 catch (JsonException)
                 {
-                    // 解析失敗時跟 Python 一樣當成檔案路徑
+                    // 解析失敗時跟 Python 一樣記一筆警告，當成檔案路徑
+                    options.ReportWarning($"Failed to parse settings as JSON, treating as file path: {text}");
                     settings = ReadSettingsFile(text) ?? settings;
                 }
+            }
+            else if (ReadSettingsFile(text) is { } fromFile)
+            {
+                settings = fromFile;
             }
             else
             {
                 // 檔案不存在時 Python 只記一筆警告，用空的設定繼續
-                settings = ReadSettingsFile(text) ?? settings;
+                options.ReportWarning($"Settings file not found: {text}");
             }
         }
 
         settings["sandbox"] = JsonNode.Parse(JsonWriting.ToCompactString(sandbox.WriteTo));
         return settings.ToJsonString();
+    }
+
+    /// <summary>
+    /// 有 <see cref="ClaudeAgentOptions.Skills"/> 時實際送出的 allowed tools 與設定檔來源。對應 Python 的 <c>_apply_skills_defaults</c>：
+    /// <see cref="SkillsAll"/> 補上 <c>Skill</c>，<see cref="SkillsList"/> 每個名稱補上 <c>Skill(名稱)</c>（已經有的不重複）；
+    /// 兩者都在沒設 <see cref="ClaudeAgentOptions.SettingSources"/> 時改成 <c>user,project</c>。不改原本的選項。
+    /// </summary>
+    /// <exception cref="ArgumentException">skill 名稱無法安全地放進 <c>Skill(名稱)</c> 規則。</exception>
+    internal static (List<string> AllowedTools, IReadOnlyList<string>? SettingSources) ApplySkillsDefaults(ClaudeAgentOptions options)
+    {
+        List<string> allowedTools = [.. options.AllowedTools];
+        var settingSources = options.SettingSources;
+        switch (options.Skills)
+        {
+            case null:
+                return (allowedTools, settingSources);
+            case SkillsAll:
+                if (!allowedTools.Contains("Skill"))
+                {
+                    allowedTools.Add("Skill");
+                }
+
+                break;
+            case SkillsList list:
+                foreach (var name in list.Names)
+                {
+                    ValidateSkillName(name);
+                    var pattern = $"Skill({name})";
+                    if (!allowedTools.Contains(pattern))
+                    {
+                        allowedTools.Add(pattern);
+                    }
+                }
+
+                break;
+            default:
+                break;
+        }
+
+        return (allowedTools, settingSources ?? ["user", "project"]);
+    }
+
+    /// <summary>
+    /// 拒絕放不進 <c>Skill(名稱)</c> 規則的 skill 名稱，對應 Python 的 <c>_validate_skill_name</c>，檢查的順序也一樣。
+    /// <c>--allowedTools</c> 在括號外以逗號與空白切開規則，而且不認跳脫字元，含分隔字元的名稱沒辦法可靠地傳過去；
+    /// 切得開、但永遠對不到 skill 的名稱也拒絕，免得規則默默什麼都沒開放。
+    /// </summary>
+    /// <exception cref="ArgumentException">名稱不合規則。</exception>
+    internal static void ValidateSkillName(string name)
+    {
+        if (name is null)
+        {
+            throw new ArgumentException("skill 名稱不能是 null。", nameof(name));
+        }
+
+        if (name.Trim().Length == 0)
+        {
+            throw new ArgumentException("skill 名稱不能是空的。", nameof(name));
+        }
+
+        if (HasUnpairedSurrogate(name))
+        {
+            throw new ArgumentException($"skill 名稱 {name} 不合法：含有不成對的 surrogate，永遠對不到 CLI 找到的 skill。", nameof(name));
+        }
+
+        if (name != name.Trim())
+        {
+            throw new ArgumentException($"skill 名稱 '{name}' 不合法：前後的空白永遠對不到，Skill 工具會把呼叫的名稱去掉前後空白。", nameof(name));
+        }
+
+        if (name.AsSpan().ContainsAny(SkillNameInvalidCharValues))
+        {
+            throw new ArgumentException(
+                $"skill 名稱 {name} 不合法：不能有括號、逗號、控制字元與 BOM。名稱是 skill 的資料夾名稱，plugin 的 skill 寫成 plugin:skill。",
+                nameof(name));
+        }
+
+        if (name == "*")
+        {
+            throw new ArgumentException("skill 名稱 '*' 不合法：要開啟每一個 skill 請用 SkillsAll。", nameof(name));
+        }
+
+        if (name.EndsWith(":*", StringComparison.Ordinal) || name.EndsWith(" *", StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"skill 名稱 {name} 不合法：不能用萬用字元結尾，請逐一列出完整的名稱。", nameof(name));
+        }
+
+        if (name.StartsWith('/'))
+        {
+            throw new ArgumentException($"skill 名稱 {name} 不合法：不能以 / 開頭。這裡要的是 skill 的正式名稱，不是斜線指令的寫法。", nameof(name));
+        }
+
+        if (name.Contains(@"\\", StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"skill 名稱 {name} 不合法：不能有連續的反斜線，規則解析時會被合併，變成別的 skill。", nameof(name));
+        }
+
+        if (name.EndsWith('\\'))
+        {
+            throw new ArgumentException($"skill 名稱 {name} 不合法：不能以單獨的反斜線結尾。", nameof(name));
+        }
+    }
+
+    private static bool HasUnpairedSurrogate(string value)
+    {
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (char.IsHighSurrogate(value[i]) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
+            {
+                i++;
+            }
+            else if (char.IsSurrogate(value[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static JsonObject? ReadSettingsFile(string path) =>
