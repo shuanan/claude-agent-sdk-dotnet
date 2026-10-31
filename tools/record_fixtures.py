@@ -46,7 +46,7 @@ FIXTURES_DIR = REPO_ROOT / "tests" / "PamisWang.ClaudeAgentSdk.Tests" / "Fixture
 SANDBOX = Path(tempfile.gettempdir()) / "pamiswang-claude-agent-sdk-fixtures"
 SCENARIO_TIMEOUT_S = 180
 MODEL = "haiku"
-# 跟 chibi-office 的 chat.ts 一樣：畫面沒有回答選擇題的介面
+# 模擬有自己畫面的應用程式：畫面上沒有回答選擇題的介面
 DISALLOWED_TOOLS = ["AskUserQuestion"]
 DENY_MESSAGE = "使用者在辦公室拒絕了這個動作"
 WRITE_PROMPT = "用 Write 工具在目前資料夾建立 hello.txt，內容是「你好」。不要用其他工具。"
@@ -319,8 +319,9 @@ SCRUB_RULES: list[tuple[re.Pattern[str], str]] = [
     (_path_pattern(Path.home()), "<HOME>"),
     (_project_dir_pattern(Path.home()), "<HOME-PROJECT-DIR>"),
     (re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+"), "user@example.com"),
-    # initialize 回應的 account 裡有帳號所屬的組織名稱
+    # initialize 回應的 account 裡有帳號所屬的組織名稱與訂閱方案
     (re.compile(r'("organization": )"[^"]*"'), r'\1"Example Org"'),
+    (re.compile(r'("subscriptionType": )"[^"]*"'), r'\1"Claude Pro"'),
 ]
 
 

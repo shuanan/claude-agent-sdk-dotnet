@@ -42,14 +42,14 @@ public sealed class CliEnvironmentTests
             Env = new Dictionary<string, string>
             {
                 ["CLAUDE_CODE_ENTRYPOINT"] = "sdk-ts",
-                ["CLAUDE_AGENT_SDK_CLIENT_APP"] = "chibi-office/1.0",
+                ["CLAUDE_AGENT_SDK_CLIENT_APP"] = "my-app/1.0",
             },
         };
 
         var env = Apply(options);
 
         Assert.Equal("sdk-ts", env["CLAUDE_CODE_ENTRYPOINT"]);
-        Assert.Equal("chibi-office/1.0", env["CLAUDE_AGENT_SDK_CLIENT_APP"]);
+        Assert.Equal("my-app/1.0", env["CLAUDE_AGENT_SDK_CLIENT_APP"]);
     }
 
     [Fact]
