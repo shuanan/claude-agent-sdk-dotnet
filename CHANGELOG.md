@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.1.0-preview.2（未發佈）
+## 0.1.0-preview.3（2026-10-31）
+
+- 函式庫沒有變更。git 歷史改寫過（協定樣本去識別化），重新發佈讓套件記錄的 commit 對應到現在的歷史；
+  preview.1、preview.2 記錄的是改寫前的 commit。
+- 協定樣本的去識別化加上帳號的訂閱方案。
+
+## 0.1.0-preview.2（2026-10-31）
 
 - `ClaudeAgentOptions.SystemPrompt`：`SystemPromptPreset`（Claude Code 預設的系統提示詞，可以在後面附加一段）、
   `SystemPromptCustom`（自訂全文）、`SystemPromptFile`（從檔案讀）。沒指定時照舊傳空的系統提示詞，跟 Python SDK 一樣。
