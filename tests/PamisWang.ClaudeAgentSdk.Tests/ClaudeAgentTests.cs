@@ -1,4 +1,5 @@
 using System.Text.Json;
+using PamisWang.ClaudeAgentSdk.Hooks;
 using PamisWang.ClaudeAgentSdk.Mcp;
 using PamisWang.ClaudeAgentSdk.Messages;
 using PamisWang.ClaudeAgentSdk.Permissions;
@@ -73,6 +74,50 @@ public sealed class ClaudeAgentTests : IDisposable
         var messages = await collecting;
 
         Assert.Equal("allow", permission.GetProperty("response").GetProperty("response").GetProperty("behavior").GetString());
+        Assert.IsType<ResultMessage>(messages[^1]);
+    }
+
+    [Fact]
+    public async Task QueryAsync_WithHooks_RegistersThemAndKeepsInputOpenUntilResult()
+    {
+        var transport = new ScriptedTransport();
+        var options = new ClaudeAgentOptions
+        {
+            Hooks = new Dictionary<string, IReadOnlyList<HookMatcher>>
+            {
+                [HookEvent.PreToolUse] = [new HookMatcher("Bash", (input, _, _, _) => ValueTask.FromResult<HookOutput>(new SyncHookOutput
+                {
+                    HookSpecificOutput = new PreToolUseHookSpecificOutput
+                    {
+                        PermissionDecision = "deny",
+                        PermissionDecisionReason = $"不准 {((PreToolUseHookInput)input).ToolInput.GetProperty("command").GetString()}",
+                    },
+                }))],
+            },
+        };
+        var collecting = CollectAsync(ClaudeAgent.QueryCoreAsync("刪掉", options, transport));
+
+        var initialize = await transport.NextWriteAsync();
+        RespondSuccess(transport, initialize);
+        await transport.NextWriteAsync();
+        // 送出問題後 stdin 還開著，CLI 才能在回合中呼叫 hook
+        Assert.False(transport.InputEnded.IsCompleted);
+        transport.Push("""{"type":"control_request","request_id":"hook-1","request":{"subtype":"hook_callback","callback_id":"hook_0","input":{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /"}},"tool_use_id":"tu1"}}""");
+        var hookResponse = await transport.NextWriteAsync();
+        transport.Push(Assistant);
+
+        Assert.False(transport.InputEnded.IsCompleted);
+        transport.Push(Result);
+        await transport.InputEnded.WaitAsync(Timeout);
+        transport.End();
+        var messages = await collecting;
+
+        Assert.Equal(
+            """{"PreToolUse":[{"matcher":"Bash","hookCallbackIds":["hook_0"]}]}""",
+            initialize.GetProperty("request").GetProperty("hooks").GetRawText());
+        var specific = hookResponse.GetProperty("response").GetProperty("response").GetProperty("hookSpecificOutput");
+        Assert.Equal("deny", specific.GetProperty("permissionDecision").GetString());
+        Assert.Equal("不准 rm -rf /", specific.GetProperty("permissionDecisionReason").GetString());
         Assert.IsType<ResultMessage>(messages[^1]);
     }
 

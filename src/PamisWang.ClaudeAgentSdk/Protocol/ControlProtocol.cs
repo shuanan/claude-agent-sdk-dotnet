@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using PamisWang.ClaudeAgentSdk.Hooks;
 using PamisWang.ClaudeAgentSdk.Mcp;
 using PamisWang.ClaudeAgentSdk.Permissions;
 using PamisWang.ClaudeAgentSdk.Transport;
@@ -12,7 +13,7 @@ using PamisWang.ClaudeAgentSdk.Transport;
 namespace PamisWang.ClaudeAgentSdk.Protocol;
 
 /// <summary>
-/// 在 transport 上跑 control 協定：初始化握手、讀取迴圈分流、回覆 CLI 的權限詢問與 SDK MCP server 的訊息、送出中斷、換模型與套用設定。
+/// 在 transport 上跑 control 協定：初始化握手、讀取迴圈分流、回覆 CLI 的權限詢問、hook 回呼與 SDK MCP server 的訊息、送出中斷、換模型與套用設定。
 /// 對應 Python SDK 的 <c>Query</c> 裡互動式 client 用到的部分；
 /// 一次性 <c>query()</c> 用來判斷何時關 stdin 的 run 生命週期（session state、上限計時）不在這裡，互動式的 stdin 只在關閉時才關。
 /// </summary>
@@ -28,6 +29,13 @@ internal sealed class ControlProtocol : IAsyncDisposable
 
     // SDK MCP server，鍵是 McpServers 的鍵，也就是 CLI 在 mcp_message 的 server_name 裡用的名字
     private readonly Dictionary<string, SdkMcpServerSession> _sdkMcpServers = [];
+
+    // hook 回呼，鍵是 initialize 時登記給 CLI 的 hook_<n>
+    private readonly Dictionary<string, HookCallback> _hookCallbacks = [];
+
+    // initialize 的 hooks 內容：事件 → 各 matcher 的 matcher、回呼 ID 與逾時；沒有就送 null
+    private readonly List<(string Event, List<(string? Matcher, List<string> CallbackIds, double? Timeout)> Matchers)> _hooksConfig = [];
+    private readonly bool _hasHooks;
 
     // 一般訊息交給上層。不設上限：讀取迴圈若因為上層沒在讀而停住，control 回應也會跟著收不到，
     // 例如上層一邊等 interrupt 的回應、一邊沒在讀訊息，就會互等
@@ -52,10 +60,37 @@ internal sealed class ControlProtocol : IAsyncDisposable
     public ControlProtocol(
         ITransport transport,
         Func<ToolPermissionRequest, CancellationToken, Task<PermissionResult>>? canUseTool,
-        IReadOnlyDictionary<string, McpServerConfig>? mcpServers = null)
+        IReadOnlyDictionary<string, McpServerConfig>? mcpServers = null,
+        IReadOnlyDictionary<string, IReadOnlyList<HookMatcher>>? hooks = null)
     {
         _transport = transport;
         _canUseTool = canUseTool;
+
+        // 對應 Python Query.initialize 組 hooks_config：回呼依登記順序編號，沒有 matcher 的事件不送，逾時有給才送
+        _hasHooks = hooks is { Count: > 0 };
+        foreach (var (hookEvent, matchers) in hooks ?? ReadOnlyDictionary<string, IReadOnlyList<HookMatcher>>.Empty)
+        {
+            if (matchers is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            List<(string?, List<string>, double?)> matcherConfigs = [];
+            foreach (var matcher in matchers)
+            {
+                List<string> callbackIds = [];
+                foreach (var callback in matcher.Hooks)
+                {
+                    var callbackId = $"hook_{_hookCallbacks.Count}";
+                    _hookCallbacks[callbackId] = callback;
+                    callbackIds.Add(callbackId);
+                }
+
+                matcherConfigs.Add((matcher.Matcher, callbackIds, matcher.Timeout));
+            }
+
+            _hooksConfig.Add((hookEvent, matcherConfigs));
+        }
 
         // 對應 Python client 從 mcp_servers 挑出 type 是 sdk 的那些，交給 Query 建 bridge
         foreach (var (name, config) in mcpServers ?? ReadOnlyDictionary<string, McpServerConfig>.Empty)
@@ -68,10 +103,10 @@ internal sealed class ControlProtocol : IAsyncDisposable
     }
 
     /// <summary>
-    /// CLI 可能還會送來要回覆的 control request：有 SDK MCP server 或權限回呼。這時一次性的 query 要等結果才能關 stdin。
-    /// 對應 Python 的 <c>_has_bidirectional_needs</c>（hook 這裡還沒有）。
+    /// CLI 可能還會送來要回覆的 control request：有 SDK MCP server、hook 或權限回呼。這時一次性的 query 要等結果才能關 stdin。
+    /// 對應 Python 的 <c>_has_bidirectional_needs</c>。
     /// </summary>
-    public bool HasBidirectionalNeeds => _sdkMcpServers.Count > 0 || _canUseTool is not null;
+    public bool HasBidirectionalNeeds => _sdkMcpServers.Count > 0 || _hasHooks || _canUseTool is not null;
 
     /// <summary>關閉時等權限回呼收尾的時間上限。測試會調短。</summary>
     internal TimeSpan HandlerShutdownTimeout { get; init; } = TimeSpan.FromSeconds(5);
@@ -82,6 +117,7 @@ internal sealed class ControlProtocol : IAsyncDisposable
     /// <summary>
     /// 初始化握手，回傳 CLI 的回應（指令、模型、帳號等資訊）。CLI 回應前不要送使用者訊息。
     /// 有 <paramref name="agents"/> 時跟 Python 一樣放在 <c>agents</c>，空的就不送。
+    /// hook 跟 Python 一樣放在 <c>hooks</c>：<c>{事件: [{"matcher", "hookCallbackIds", "timeout"?}]}</c>，沒有就是 <see langword="null"/>。
     /// </summary>
     public Task<JsonElement> InitializeAsync(
         TimeSpan timeout,
@@ -91,7 +127,7 @@ internal sealed class ControlProtocol : IAsyncDisposable
             "initialize",
             writer =>
             {
-                writer.WriteNull("hooks");
+                WriteHooksConfig(writer);
                 if (agents is { Count: > 0 })
                 {
                     writer.WriteStartObject("agents");
@@ -106,6 +142,37 @@ internal sealed class ControlProtocol : IAsyncDisposable
             },
             timeout,
             cancellationToken);
+
+    private void WriteHooksConfig(Utf8JsonWriter writer)
+    {
+        if (_hooksConfig.Count == 0)
+        {
+            writer.WriteNull("hooks");
+            return;
+        }
+
+        writer.WriteStartObject("hooks");
+        foreach (var (hookEvent, matchers) in _hooksConfig)
+        {
+            writer.WriteStartArray(hookEvent);
+            foreach (var (matcher, callbackIds, timeout) in matchers)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("matcher", matcher);
+                writer.WriteOptional("hookCallbackIds", callbackIds);
+                if (timeout is { } seconds)
+                {
+                    writer.WriteNumber("timeout", seconds);
+                }
+
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+        }
+
+        writer.WriteEndObject();
+    }
 
     /// <summary>中斷這一輪；對話還在，之後可以接著說。</summary>
     public Task InterruptAsync(CancellationToken cancellationToken = default) =>
@@ -391,6 +458,9 @@ internal sealed class ControlProtocol : IAsyncDisposable
                     "can_use_tool" => ControlMessages.Success(
                         requestId,
                         await AnswerPermissionAsync(request, cancellationToken).ConfigureAwait(false)),
+                    "hook_callback" => ControlMessages.Success(
+                        requestId,
+                        await AnswerHookCallbackAsync(request, cancellationToken).ConfigureAwait(false)),
                     "mcp_message" => ControlMessages.Success(
                         requestId,
                         await AnswerMcpMessageAsync(request, cancellationToken).ConfigureAwait(false)),
@@ -481,6 +551,25 @@ internal sealed class ControlProtocol : IAsyncDisposable
             },
             _ => throw new InvalidOperationException("CanUseTool 要回傳 PermissionResultAllow 或 PermissionResultDeny。"),
         };
+    }
+
+    /// <summary>
+    /// 呼叫登記的 hook 回呼，回傳寫出它結果的方法。對應 Python 的 <c>_handle_control_request</c> 裡 hook_callback 的部分
+    /// 與 <c>_convert_hook_output_for_cli</c>（<see cref="HookOutput"/> 寫出的已經是 CLI 的欄位名稱）。
+    /// </summary>
+    private async Task<Action<Utf8JsonWriter>> AnswerHookCallbackAsync(JsonElement request, CancellationToken cancellationToken)
+    {
+        var callbackId = GetString(request, "callback_id");
+        if (callbackId is null || !_hookCallbacks.TryGetValue(callbackId, out var callback))
+        {
+            throw new InvalidOperationException($"No hook callback found for ID: {callbackId}");
+        }
+
+        var input = HookInput.Parse(request.TryGetProperty("input", out var value) ? value : default);
+        var output = await callback(input, GetString(request, "tool_use_id"), new HookContext(cancellationToken), cancellationToken)
+                .ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"hook 回呼 {callbackId} 回傳了 null；什麼都不改請回傳 HookOutput.Empty。");
+        return output.WriteFields;
     }
 
     /// <summary>
