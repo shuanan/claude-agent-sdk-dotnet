@@ -190,6 +190,7 @@ public sealed class ClaudeAgentClientTests : IDisposable
         await Assert.ThrowsAsync<ObjectDisposedException>(() => client.SendAsync("你好"));
         await Assert.ThrowsAsync<ObjectDisposedException>(() => client.InterruptAsync());
         await Assert.ThrowsAsync<ObjectDisposedException>(() => client.SetModelAsync("sonnet"));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => client.SetPermissionModeAsync("plan"));
         await Assert.ThrowsAsync<ObjectDisposedException>(() => client.ApplyFlagSettingsAsync(new JsonObject { ["effortLevel"] = "low" }));
         await Assert.ThrowsAsync<ObjectDisposedException>(() => client.ConnectAsync());
     }
@@ -215,6 +216,60 @@ public sealed class ClaudeAgentClientTests : IDisposable
         await client.DisposeAsync();
     }
 
+    [Fact]
+    public async Task ConnectAsync_CanUseToolWithPermissionPromptToolName_ThrowsBeforeStartingCli()
+    {
+        var transport = new ScriptedTransport();
+        var options = new ClaudeAgentOptions
+        {
+            PermissionPromptToolName = "mcp__perm__ask",
+            CanUseTool = (_, _) => Task.FromResult<PermissionResult>(new PermissionResultAllow()),
+        };
+        await using var client = new ClaudeAgentClient(options, transport);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => client.ConnectAsync());
+
+        Assert.False(client.IsConnected);
+        Assert.True(transport.HasNoPendingWrites);
+    }
+
+    [Fact]
+    public async Task ConnectAsync_WithAgents_SendsThemInInitialize()
+    {
+        var transport = new ScriptedTransport();
+        var options = new ClaudeAgentOptions
+        {
+            Agents = new Dictionary<string, AgentDefinition> { ["helper"] = new("Helps out", "You help.") { Model = "haiku" } },
+        };
+        await using var client = new ClaudeAgentClient(options, transport);
+
+        var connecting = client.ConnectAsync();
+        var initialize = await transport.NextWriteAsync();
+        RespondSuccess(transport, initialize);
+        await connecting.WaitAsync(Timeout);
+
+        Assert.Equal(
+            """{"subtype":"initialize","hooks":null,"agents":{"helper":{"description":"Helps out","prompt":"You help.","model":"haiku"}}}""",
+            initialize.GetProperty("request").GetRawText());
+    }
+
+    [Fact]
+    public async Task SetPermissionModeAsync_SendsControlRequest()
+    {
+        var transport = new ScriptedTransport();
+        await using var client = new ClaudeAgentClient(new ClaudeAgentOptions(), transport);
+        var connecting = client.ConnectAsync();
+        RespondSuccess(transport, await transport.NextWriteAsync());
+        await connecting.WaitAsync(Timeout);
+
+        var setting = client.SetPermissionModeAsync("bypassPermissions");
+        var request = await transport.NextWriteAsync();
+        RespondSuccess(transport, request);
+        await setting.WaitAsync(Timeout);
+
+        Assert.Equal("""{"subtype":"set_permission_mode","mode":"bypassPermissions"}""", request.GetProperty("request").GetRawText());
+    }
+
     [Theory]
     [InlineData(null, 60)]
     [InlineData("", 60)]
@@ -225,6 +280,9 @@ public sealed class ClaudeAgentClientTests : IDisposable
     {
         Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), ClaudeAgentClient.InitializeTimeout(environmentValue));
     }
+
+    private static void RespondSuccess(ScriptedTransport transport, System.Text.Json.JsonElement request) =>
+        transport.Push($$$"""{"type":"control_response","response":{"subtype":"success","request_id":"{{{request.GetProperty("request_id").GetString()}}}"}}""");
 
     private static async Task<List<ClaudeMessage>> CollectAsync(IAsyncEnumerable<ClaudeMessage> messages)
     {

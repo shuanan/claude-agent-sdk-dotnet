@@ -10,6 +10,7 @@ internal sealed class ScriptedTransport : ITransport
 {
     private readonly Channel<JsonElement> _incoming = Channel.CreateUnbounded<JsonElement>();
     private readonly Channel<JsonElement> _written = Channel.CreateUnbounded<JsonElement>();
+    private readonly TaskCompletionSource _inputEnded = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public bool IsReady => true;
 
@@ -58,7 +59,14 @@ internal sealed class ScriptedTransport : ITransport
         }
     }
 
-    public Task EndInputAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    /// <summary>SDK 關閉 stdin 時完成。</summary>
+    public Task InputEnded => _inputEnded.Task;
+
+    public Task EndInputAsync(CancellationToken cancellationToken = default)
+    {
+        _inputEnded.TrySetResult();
+        return Task.CompletedTask;
+    }
 
     public ValueTask DisposeAsync()
     {

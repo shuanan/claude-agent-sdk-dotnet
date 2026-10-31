@@ -37,6 +37,9 @@ internal sealed class ControlProtocol : IAsyncDisposable
     private readonly ConcurrentDictionary<Task, byte> _handlers = new();
     private readonly CancellationTokenSource _closing = new();
 
+    // 最近一則訊息若是出錯的結果就記在這裡，只有讀取迴圈會讀寫
+    private JsonElement? _lastErrorResult;
+
     private Task? _readLoop;
     private int _requestCounter;
     private volatile bool _closed;
@@ -55,9 +58,33 @@ internal sealed class ControlProtocol : IAsyncDisposable
     /// <summary>開始讀取迴圈；要在送出任何 control request 之前呼叫。</summary>
     public void Start() => _readLoop ??= Task.Run(ReadLoopAsync);
 
-    /// <summary>初始化握手，回傳 CLI 的回應（指令、模型、帳號等資訊）。CLI 回應前不要送使用者訊息。</summary>
-    public Task<JsonElement> InitializeAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
-        SendControlRequestAsync("initialize", writer => writer.WriteNull("hooks"), timeout, cancellationToken);
+    /// <summary>
+    /// 初始化握手，回傳 CLI 的回應（指令、模型、帳號等資訊）。CLI 回應前不要送使用者訊息。
+    /// 有 <paramref name="agents"/> 時跟 Python 一樣放在 <c>agents</c>，空的就不送。
+    /// </summary>
+    public Task<JsonElement> InitializeAsync(
+        TimeSpan timeout,
+        IReadOnlyDictionary<string, AgentDefinition>? agents = null,
+        CancellationToken cancellationToken = default) =>
+        SendControlRequestAsync(
+            "initialize",
+            writer =>
+            {
+                writer.WriteNull("hooks");
+                if (agents is { Count: > 0 })
+                {
+                    writer.WriteStartObject("agents");
+                    foreach (var (name, agent) in agents)
+                    {
+                        writer.WritePropertyName(name);
+                        agent.WriteTo(writer);
+                    }
+
+                    writer.WriteEndObject();
+                }
+            },
+            timeout,
+            cancellationToken);
 
     /// <summary>中斷這一輪；對話還在，之後可以接著說。</summary>
     public Task InterruptAsync(CancellationToken cancellationToken = default) =>
@@ -75,6 +102,14 @@ internal sealed class ControlProtocol : IAsyncDisposable
         return GetString(response, "model");
     }
 
+    /// <summary>換權限模式。</summary>
+    public Task SetPermissionModeAsync(string mode, CancellationToken cancellationToken = default) =>
+        SendControlRequestAsync(
+            "set_permission_mode",
+            writer => writer.WriteString("mode", mode),
+            DefaultRequestTimeout,
+            cancellationToken);
+
     /// <summary>把設定合併進這個 session 的 flag 設定層。</summary>
     public Task ApplyFlagSettingsAsync(JsonObject settings, CancellationToken cancellationToken = default) =>
         SendControlRequestAsync(
@@ -87,9 +122,13 @@ internal sealed class ControlProtocol : IAsyncDisposable
             DefaultRequestTimeout,
             cancellationToken);
 
-    /// <summary>送出使用者說的一句話。</summary>
-    public Task SendUserMessageAsync(string content, CancellationToken cancellationToken = default) =>
-        _transport.WriteAsync(ControlMessages.UserMessage(content, sessionId: "default"), cancellationToken);
+    /// <summary>送出使用者說的一句話。互動式 client 的 session ID 跟 Python 一樣是 <c>default</c>，一次性的 <c>query()</c> 是空字串。</summary>
+    public Task SendUserMessageAsync(string content, string sessionId = "default", CancellationToken cancellationToken = default) =>
+        _transport.WriteAsync(ControlMessages.UserMessage(content, sessionId), cancellationToken);
+
+    /// <summary>關閉 stdin，告訴 CLI 不會再有輸入；之後 CLI 處理完手上的訊息就會結束。</summary>
+    public Task EndInputAsync(CancellationToken cancellationToken = default) =>
+        _transport.EndInputAsync(cancellationToken);
 
     /// <summary>
     /// 讀取 control 協定以外的訊息，直到 CLI 的輸出結束。讀取失敗時丟出原本的例外，例如 <see cref="CliProcessException"/>。
@@ -187,7 +226,12 @@ internal sealed class ControlProtocol : IAsyncDisposable
             // 主動關閉時 transport 被拆掉，那時的錯誤是預期中的
             if (!_closed)
             {
-                failure = e;
+                // CLI 送出出錯的結果後會故意以非零結束（給 shell script 用），結束代碼本身沒有更多資訊；
+                // 跟 Python 一樣換成帶著結果內容的 CliResultException。還在等的 control request（例如被拒絕的
+                // resume 時的 initialize）也會拿到它
+                failure = e is CliProcessException processException && _lastErrorResult is { } errorResult
+                    ? new CliResultException(errorResult, processException)
+                    : e;
             }
         }
         finally
@@ -242,10 +286,40 @@ internal sealed class ControlProtocol : IAsyncDisposable
                 return;
 
             default:
+                TrackErrorResult(message);
                 _messages.Writer.TryWrite(message);
                 return;
         }
     }
+
+    /// <summary>
+    /// 記住最近一則訊息是不是出錯的結果。對應 Python 的 <c>_last_error_result</c>：
+    /// 結果訊息依 <c>is_error</c> 記住或清掉；其他訊息代表對話往下走了，之後的異常結束是新的錯誤，也清掉。
+    /// 一輪結束後的 <c>session_state_changed</c> 不算。control 訊息在這之前就分流掉了，同樣不算。
+    /// </summary>
+    private void TrackErrorResult(JsonElement message)
+    {
+        var type = GetString(message, "type");
+        if (type == "result")
+        {
+            _lastErrorResult = message.TryGetProperty("is_error", out var isError) && IsTruthy(isError) ? message : null;
+        }
+        else if (!(type == "system" && GetString(message, "subtype") == "session_state_changed"))
+        {
+            _lastErrorResult = null;
+        }
+    }
+
+    /// <summary>跟 Python 的真假值判斷一樣。</summary>
+    private static bool IsTruthy(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.True => true,
+        JsonValueKind.Number => value.GetDouble() != 0,
+        JsonValueKind.String => value.GetString()!.Length > 0,
+        JsonValueKind.Array => value.GetArrayLength() > 0,
+        JsonValueKind.Object => value.EnumerateObject().Any(),
+        _ => false,
+    };
 
     private void CompletePendingRequest(JsonElement response)
     {

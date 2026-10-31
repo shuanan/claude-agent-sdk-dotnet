@@ -83,8 +83,11 @@ public sealed class ClaudeAgentClient : IAsyncDisposable
     /// <exception cref="CliConnectionException">啟動失敗，或 CLI 在握手完成前就結束。</exception>
     /// <exception cref="TimeoutException">CLI 遲遲沒有回應初始化。</exception>
     /// <exception cref="InvalidOperationException">已經連線過。</exception>
+    /// <exception cref="ArgumentException">選項互相衝突，例如同時設了 <see cref="ClaudeAgentOptions.CanUseTool"/> 與 <see cref="ClaudeAgentOptions.PermissionPromptToolName"/>。</exception>
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
+        // 跟 Python 一樣在啟動 CLI 之前檢查；自訂的 transport 不經過 CliArguments，也要擋
+        _options.Validate();
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_state == ClientState.Closed, this);
@@ -102,7 +105,10 @@ public sealed class ClaudeAgentClient : IAsyncDisposable
             await _transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
             protocol.Start();
             ServerInfo = await protocol
-                .InitializeAsync(InitializeTimeout(Environment.GetEnvironmentVariable("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT")), cancellationToken)
+                .InitializeAsync(
+                    InitializeTimeout(Environment.GetEnvironmentVariable("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT")),
+                    _options.Agents,
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
         catch
@@ -139,8 +145,16 @@ public sealed class ClaudeAgentClient : IAsyncDisposable
     public Task SendAsync(string prompt, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(prompt);
-        return RequireProtocol().SendUserMessageAsync(prompt, cancellationToken);
+        return RequireProtocol().SendUserMessageAsync(prompt, cancellationToken: cancellationToken);
     }
+
+    /// <summary>送出一句話，指定訊息的 session ID；一次性的 <see cref="ClaudeAgent.QueryAsync"/> 跟 Python 一樣用空字串。</summary>
+    internal Task SendWithSessionIdAsync(string prompt, string sessionId, CancellationToken cancellationToken) =>
+        RequireProtocol().SendUserMessageAsync(prompt, sessionId, cancellationToken);
+
+    /// <summary>關閉 stdin，告訴 CLI 不會再有輸入。</summary>
+    internal Task EndInputAsync(CancellationToken cancellationToken) =>
+        RequireProtocol().EndInputAsync(cancellationToken);
 
     /// <summary>
     /// 讀取 CLI 送來的每一則訊息，跨越多輪，直到 CLI 結束或 client 關閉。
@@ -185,6 +199,16 @@ public sealed class ClaudeAgentClient : IAsyncDisposable
     /// </summary>
     public Task<string?> SetModelAsync(string? model = null, CancellationToken cancellationToken = default) =>
         RequireProtocol().SetModelAsync(model, cancellationToken);
+
+    /// <summary>
+    /// 換權限模式：<c>default</c>、<c>acceptEdits</c>、<c>plan</c>、<c>bypassPermissions</c>、<c>dontAsk</c> 或 <c>auto</c>。
+    /// 對話還在，不用重新連線。對應 Python 的 <c>set_permission_mode()</c>。
+    /// </summary>
+    public Task SetPermissionModeAsync(string mode, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(mode);
+        return RequireProtocol().SetPermissionModeAsync(mode, cancellationToken);
+    }
 
     /// <summary>
     /// 對話中途套用設定，鍵與值跟 Claude Code 的 <c>settings.json</c> 一樣。設定合併進這個 session 的 flag 設定層

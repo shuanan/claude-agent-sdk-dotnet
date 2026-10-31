@@ -109,6 +109,8 @@ await client.ApplyFlagSettingsAsync(new JsonObject { ["effortLevel"] = "max" });
 - 系統提示詞：Claude Code 預設的、在預設後面附加、自訂全文、從檔案讀 / System prompts: Claude Code's default, appended to the default, fully custom, or read from a file
 - 指定模型與思考深度（`--model`、`--effort`），對話中途換模型（`set_model`） / Choosing the model and effort (`--model`, `--effort`), and switching models mid-conversation (`set_model`)
 - 對話中途套用設定，例如換思考深度（`apply_flag_settings`；Python SDK 沒有，照 TypeScript SDK 的協定） / Applying settings mid-conversation, such as the effort level (`apply_flag_settings`; missing from the Python SDK, follows the TypeScript SDK's protocol)
+- 對話中途換權限模式（`SetPermissionModeAsync`）；一次性問答 `ClaudeAgent.QueryAsync`（對應 Python 的 `query()`） / Switching the permission mode mid-conversation (`SetPermissionModeAsync`); one-shot `ClaudeAgent.QueryAsync` (Python's `query()`)
+- 跟 Python 一樣的其他選項 / Further options matching Python: `Tools`, `AllowedTools`, `MaxTurns`, `MaxBudgetUsd`, `FallbackModel`, `Betas`, `PermissionPromptToolName`, `PermissionMode`, `ContinueConversation`, `SessionId`, `Settings` + `Sandbox`, `AddDirs`, `McpServers`（外部的 stdio/SSE/HTTP / external stdio/SSE/HTTP）/ `McpConfig`, `StrictMcpConfig`, `ForkSession`, `SettingSources`, `Plugins`, `ExtraArgs`, `Thinking` / `MaxThinkingTokens`, `OutputFormat`, `Agents`
 
 不做 / Not planned: hook 回呼、SDK 內的 MCP server、session store、transcript mirror / hook callbacks, in-SDK MCP servers, session stores, transcript mirroring.
 
