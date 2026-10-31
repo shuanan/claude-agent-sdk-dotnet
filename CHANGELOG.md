@@ -40,6 +40,18 @@
   （`task_started`、`task_notification`、`task_updated` 的結束狀態），看 `session_state_changed` 的 `idle`，結果之後一直 running 時以
   `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`（預設 10 分鐘、`0` 不限）為上限。以前是收到第一個結果就關，背景工作之後的 hook 與 SDK MCP 呼叫會失敗。
 - 跟 Python 不同的地方：沒有 `load_timeout_ms`（只用在 session store）與已經不用的 `debug_stderr`；`skills` 給字串的 TypeError 在 C# 寫不出來。
+- 本機的 session 紀錄，對應 Python `_internal/sessions.py`、`session_mutations.py`、`session_summary.py` 不經過 session store 的部分：
+  `ClaudeSessions.ListSessions`（`list_sessions`，含 worktree 掃描、去重複、排序與分頁）、`GetSessionInfo`、`GetSessionMessages`
+  （依 `parentUuid` 串主線、補回平行工具呼叫漏掉的呼叫與結果）、`ListSubagents`、`GetSubagentMessages`（讀 `.meta.json` 的上層 ID）、
+  `ProjectKeyForDirectory`、`RenameSession`、`TagSession`（Unicode 清理）、`DeleteSession`、`ForkSession`、`FoldSessionSummary`；
+  型別 `SdkSessionInfo`、`SessionMessage`（原始訊息在 `Message`）、`ForkSessionResult`、`SessionKey`、`SessionSummaryEntry`。
+  資料夾命名（sanitize + 長路徑雜湊）、realpath + NFC、開頭結尾各 64 KiB 的讀法、`created_at` 的時間解析、寫出的 JSON（`ensure_ascii`、分隔符號、
+  浮點數）都照 Python 的行為；Python 的 `test_sessions.py`、`test_session_mutations.py`、`test_session_summary.py` 裡不經過 store 的測試全部 1:1 移植。
+  跟 Python 不同的地方：多了 `claudeConfigDir` 參數（等同設 `CLAUDE_CONFIG_DIR`，不必改環境變數）；`ValueError` 是 `ArgumentException`、
+  `FileNotFoundError` 是 `FileNotFoundException`；附加 metadata 不是 `O_APPEND`（寫在開檔當下的檔尾）；Windows 的 realpath 不改大小寫；
+  `fromisoformat` 不支援 ISO 週日期；JSON 裡的 `NaN`/`Infinity` 與不成對的 surrogate 跳脫當成壞掉的行；分支時 progress 紀錄的 `parentUuid` 迴圈會停下來（Python 會卡住）。
+  不做：session store 的部分（`SessionStore`、`InMemorySessionStore`、`*_from_store`／`*_via_store`、`import_session_to_store`、
+  store resume 的檔案還原、transcript mirror、`load_timeout_ms`）。
 
 ## 0.1.0-preview.3（2026-10-31）
 
