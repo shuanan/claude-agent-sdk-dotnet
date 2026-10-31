@@ -99,7 +99,8 @@ public sealed class ClaudeAgentClient : IAsyncDisposable
             _state = ClientState.Connecting;
         }
 
-        var protocol = new ControlProtocol(_transport, _options.CanUseTool);
+        // SDK MCP server 跟 Python 一樣從 McpServers 挑出來；CLI 的 mcp_message 由 protocol 交給它們
+        var protocol = new ControlProtocol(_transport, _options.CanUseTool, _options.McpServers);
         try
         {
             await _transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
@@ -151,6 +152,9 @@ public sealed class ClaudeAgentClient : IAsyncDisposable
     /// <summary>送出一句話，指定訊息的 session ID；一次性的 <see cref="ClaudeAgent.QueryAsync"/> 跟 Python 一樣用空字串。</summary>
     internal Task SendWithSessionIdAsync(string prompt, string sessionId, CancellationToken cancellationToken) =>
         RequireProtocol().SendUserMessageAsync(prompt, sessionId, cancellationToken);
+
+    /// <summary>CLI 還可能送來要回覆的 control request（有 SDK MCP server 或 <see cref="ClaudeAgentOptions.CanUseTool"/>），stdin 要留著。</summary>
+    internal bool HasBidirectionalNeeds => RequireProtocol().HasBidirectionalNeeds;
 
     /// <summary>關閉 stdin，告訴 CLI 不會再有輸入。</summary>
     internal Task EndInputAsync(CancellationToken cancellationToken) =>

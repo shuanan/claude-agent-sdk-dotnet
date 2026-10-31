@@ -1,4 +1,5 @@
 using System.Text.Json;
+using PamisWang.ClaudeAgentSdk.Mcp;
 using PamisWang.ClaudeAgentSdk.Messages;
 using PamisWang.ClaudeAgentSdk.Permissions;
 using PamisWang.ClaudeAgentSdk.Tests.Protocol;
@@ -73,6 +74,64 @@ public sealed class ClaudeAgentTests : IDisposable
 
         Assert.Equal("allow", permission.GetProperty("response").GetProperty("response").GetProperty("behavior").GetString());
         Assert.IsType<ResultMessage>(messages[^1]);
+    }
+
+    [Fact]
+    public async Task QueryAsync_WithSdkMcpServer_KeepsInputOpenForToolCallsUntilResultThenEndsIt()
+    {
+        var transport = new ScriptedTransport();
+        var add = SdkMcpTool.Create(
+            "add",
+            "Add two numbers",
+            McpSchema.Parameters(("a", typeof(double)), ("b", typeof(double))),
+            args => ValueTask.FromResult(McpToolResult.Text($"{args.GetProperty("a").GetDouble() + args.GetProperty("b").GetDouble()}")));
+        var options = new ClaudeAgentOptions
+        {
+            McpServers = new Dictionary<string, McpServerConfig> { ["calc"] = SdkMcpServer.Create("calculator", add) },
+            AllowedTools = ["mcp__calc__add"],
+        };
+        var collecting = CollectAsync(ClaudeAgent.QueryCoreAsync("1+2?", options, transport));
+
+        RespondSuccess(transport, await transport.NextWriteAsync());
+        await transport.NextWriteAsync();
+        // 送出問題後 stdin 還開著，CLI 才能在回合中呼叫工具
+        Assert.False(transport.InputEnded.IsCompleted);
+        // 跟 CLI 一樣先握手，再呼叫工具
+        transport.Push("""{"type":"control_request","request_id":"mcp-0","request":{"subtype":"mcp_message","server_name":"calc","message":{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude-code","version":"2.1.312"}}}}}""");
+        await transport.NextWriteAsync();
+        transport.Push("""{"type":"control_request","request_id":"mcp-1","request":{"subtype":"mcp_message","server_name":"calc","message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add","arguments":{"a":1,"b":2}}}}}""");
+        var toolResponse = await transport.NextWriteAsync();
+        transport.Push(Assistant);
+
+        Assert.False(transport.InputEnded.IsCompleted);
+        transport.Push(Result);
+        await transport.InputEnded.WaitAsync(Timeout);
+        transport.End();
+        var messages = await collecting;
+
+        Assert.Equal(
+            """{"type":"control_response","response":{"subtype":"success","request_id":"mcp-1","response":{"mcp_response":{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"3"}],"isError":false}}}}}""",
+            toolResponse.GetRawText());
+        Assert.IsType<ResultMessage>(messages[^1]);
+    }
+
+    [Fact]
+    public async Task QueryAsync_WithOnlyExternalMcpServer_EndsInputRightAfterPrompt()
+    {
+        var transport = new ScriptedTransport();
+        var options = new ClaudeAgentOptions
+        {
+            McpServers = new Dictionary<string, McpServerConfig> { ["fs"] = new McpStdioServerConfig("npx") },
+        };
+        var collecting = CollectAsync(ClaudeAgent.QueryCoreAsync("hi", options, transport));
+
+        RespondSuccess(transport, await transport.NextWriteAsync());
+        await transport.NextWriteAsync();
+        await transport.InputEnded.WaitAsync(Timeout);
+        transport.Push(Result);
+        transport.End();
+
+        Assert.IsType<ResultMessage>(Assert.Single(await collecting));
     }
 
     [Fact]

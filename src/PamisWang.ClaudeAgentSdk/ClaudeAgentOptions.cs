@@ -5,7 +5,7 @@ using PamisWang.ClaudeAgentSdk.Permissions;
 namespace PamisWang.ClaudeAgentSdk;
 
 /// <summary>
-/// 啟動 Claude Code 的選項。對應 Python SDK 的 <c>ClaudeAgentOptions</c>；hook、SDK 內的 MCP server、session store 這些還沒有。
+/// 啟動 Claude Code 的選項。對應 Python SDK 的 <c>ClaudeAgentOptions</c>；hook、session store 這些還沒有。
 /// 各選項轉成 CLI 參數的條件與順序跟 Python 的 <c>_build_command</c> 一樣。
 /// </summary>
 public sealed class ClaudeAgentOptions
@@ -89,8 +89,10 @@ public sealed class ClaudeAgentOptions
     public IReadOnlyList<string> AddDirs { get; init; } = [];
 
     /// <summary>
-    /// 由 Claude Code 啟動或連線的 MCP server，鍵是 server 名稱（<c>--mcp-config {"mcpServers": …}</c>）。
-    /// 不能跟 <see cref="McpConfig"/> 一起用。SDK 內的 MCP server 還不支援。
+    /// MCP server，鍵是 server 名稱（<c>--mcp-config {"mcpServers": …}</c>）。可以混用由 Claude Code 啟動或連線的 server，
+    /// 與在這個程序裡跑的 <see cref="McpSdkServerConfig"/>（用 <see cref="SdkMcpServer.Create(string, IEnumerable{SdkMcpTool})"/> 建立；CLI 只拿到 <c>{"type":"sdk","name":…}</c>）。
+    /// 工具的完整名稱是 <c>mcp__&lt;鍵&gt;__&lt;工具名稱&gt;</c>，例如鍵 <c>calc</c> 的 <c>add</c> 是 <c>mcp__calc__add</c>，放進 <see cref="AllowedTools"/> 就不必詢問。
+    /// 不能跟 <see cref="McpConfig"/> 一起用。
     /// </summary>
     public IReadOnlyDictionary<string, McpServerConfig> McpServers { get; init; } = ReadOnlyDictionary<string, McpServerConfig>.Empty;
 
