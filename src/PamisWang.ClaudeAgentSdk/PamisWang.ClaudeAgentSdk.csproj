@@ -9,7 +9,7 @@
   <PropertyGroup>
     <PackageId>PamisWang.ClaudeAgentSdk</PackageId>
     <!-- 發佈時推 v{Version} 的 tag，release workflow 會檢查兩者一致 -->
-    <Version>0.1.0-preview.2</Version>
+    <Version>0.1.0-preview.3</Version>
     <Authors>Pamis Wang</Authors>
     <Copyright>Copyright (c) 2026 Pamis Wang</Copyright>
     <Description>Claude Code 的 .NET 用戶端，移植自官方 Python Agent SDK（非官方）。Unofficial .NET client for Claude Code, ported from the official Python Agent SDK.</Description>
