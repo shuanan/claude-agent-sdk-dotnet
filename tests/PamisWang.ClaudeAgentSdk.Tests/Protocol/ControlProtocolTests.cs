@@ -134,6 +134,70 @@ public sealed class ControlProtocolTests : IAsyncLifetime, IAsyncDisposable
     }
 
     [Fact]
+    public async Task SetPermissionModeAsync_SendsMode()
+    {
+        var protocol = Start();
+
+        var setting = protocol.SetPermissionModeAsync("acceptEdits");
+        var request = await _transport.NextWriteAsync();
+        RespondSuccess(request);
+        await setting.WaitAsync(Timeout);
+
+        Assert.Equal("""{"subtype":"set_permission_mode","mode":"acceptEdits"}""", request.GetProperty("request").GetRawText());
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WithAgents_SendsCamelCaseDefinitionsWithoutNulls()
+    {
+        var protocol = Start();
+        var agents = new Dictionary<string, AgentDefinition>
+        {
+            ["reviewer"] = new("審查程式碼", "你是審查者")
+            {
+                Tools = ["Read", "Grep"],
+                DisallowedTools = ["Bash"],
+                Model = "sonnet",
+                Skills = ["review"],
+                Memory = "project",
+                McpServers = ["github", new JsonObject { ["fs"] = new JsonObject { ["command"] = "npx" } }],
+                InitialPrompt = "開始",
+                MaxTurns = 5,
+                Background = false,
+                Effort = "high",
+                PermissionMode = "plan",
+            },
+            ["minimal"] = new("最少的", "提示") { Effort = 3, Tools = [] },
+        };
+
+        var initializing = protocol.InitializeAsync(Timeout, agents);
+        var request = await _transport.NextWriteAsync();
+        RespondSuccess(request);
+        await initializing.WaitAsync(Timeout);
+
+        var expected = JsonSerializer.Serialize(JsonNode.Parse("""
+            {"subtype":"initialize","hooks":null,"agents":{
+              "reviewer":{"description":"審查程式碼","prompt":"你是審查者","tools":["Read","Grep"],"disallowedTools":["Bash"],
+                "model":"sonnet","skills":["review"],"memory":"project","mcpServers":["github",{"fs":{"command":"npx"}}],
+                "initialPrompt":"開始","maxTurns":5,"background":false,"effort":"high","permissionMode":"plan"},
+              "minimal":{"description":"最少的","prompt":"提示","tools":[],"effort":3}}}
+            """));
+        Assert.Equal(expected, JsonSerializer.Serialize(request.GetProperty("request")));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_EmptyAgents_OmitsField()
+    {
+        var protocol = Start();
+
+        var initializing = protocol.InitializeAsync(Timeout, new Dictionary<string, AgentDefinition>());
+        var request = await _transport.NextWriteAsync();
+        RespondSuccess(request);
+        await initializing.WaitAsync(Timeout);
+
+        Assert.Equal("""{"subtype":"initialize","hooks":null}""", request.GetProperty("request").GetRawText());
+    }
+
+    [Fact]
     public async Task ReceiveMessagesAsync_TransportFails_RethrowsOriginalExceptionToReaderAndPendingRequest()
     {
         var protocol = Start();

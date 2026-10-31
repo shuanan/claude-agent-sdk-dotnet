@@ -32,6 +32,10 @@ switch (mode)
         await ChatAsync(stdin, stdout);
         return 0;
 
+    case "error_result":
+        // 跟真的 CLI 碰到 max_budget_usd 時一樣：回覆 initialize，收到一句話後送出出錯的結果，再以 1 結束
+        return await ErrorResultAsync(stdin, stdout);
+
     case "hang":
         // stdin 關了也不結束，要等 SDK 強制結束
         WriteLine(stdout, """{"type":"hanging"}""");
@@ -152,6 +156,44 @@ static async Task ChatAsync(Stream stdin, Stream stdout)
     });
 
     void Send(JsonObject json) => WriteLine(stdout, json.ToJsonString());
+}
+
+static async Task<int> ErrorResultAsync(Stream stdin, Stream stdout)
+{
+    using var reader = new StreamReader(stdin, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    while (await reader.ReadLineAsync() is { } line)
+    {
+        var message = JsonNode.Parse(line)!;
+        if (message["type"]!.GetValue<string>() == "control_request")
+        {
+            WriteLine(stdout, new JsonObject
+            {
+                ["type"] = "control_response",
+                ["response"] = new JsonObject
+                {
+                    ["subtype"] = "success",
+                    ["request_id"] = message["request_id"]!.GetValue<string>(),
+                    ["response"] = new JsonObject(),
+                },
+            }.ToJsonString());
+            continue;
+        }
+
+        WriteLine(stdout, new JsonObject
+        {
+            ["type"] = "result",
+            ["subtype"] = "error_max_budget_usd",
+            ["is_error"] = true,
+            ["duration_ms"] = 1,
+            ["duration_api_ms"] = 1,
+            ["num_turns"] = 1,
+            ["errors"] = new JsonArray("Reached maximum budget ($0.0001)"),
+            ["session_id"] = "fake-session",
+        }.ToJsonString());
+        return 1;
+    }
+
+    return 0;
 }
 
 static void WriteLine(Stream stream, string json) => WriteText(stream, json + "\n");
