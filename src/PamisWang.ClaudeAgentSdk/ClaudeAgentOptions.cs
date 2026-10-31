@@ -1,11 +1,12 @@
 using System.Collections.ObjectModel;
+using PamisWang.ClaudeAgentSdk.Hooks;
 using PamisWang.ClaudeAgentSdk.Mcp;
 using PamisWang.ClaudeAgentSdk.Permissions;
 
 namespace PamisWang.ClaudeAgentSdk;
 
 /// <summary>
-/// 啟動 Claude Code 的選項。對應 Python SDK 的 <c>ClaudeAgentOptions</c>；hook、session store 這些還沒有。
+/// 啟動 Claude Code 的選項。對應 Python SDK 的 <c>ClaudeAgentOptions</c>；session store 這些還沒有。
 /// 各選項轉成 CLI 參數的條件與順序跟 Python 的 <c>_build_command</c> 一樣。
 /// </summary>
 public sealed class ClaudeAgentOptions
@@ -155,6 +156,15 @@ public sealed class ClaudeAgentOptions
     /// 等待期間 CLI 撤回詢問（例如這一輪被中斷），<see cref="CancellationToken"/> 會被取消，這時回傳什麼都不會送出。
     /// </summary>
     public Func<ToolPermissionRequest, CancellationToken, Task<PermissionResult>>? CanUseTool { get; init; }
+
+    /// <summary>
+    /// hook 回呼，鍵是事件名稱（<see cref="HookEvent"/>）。對應 Python 的 <c>hooks</c>：在 initialize 時登記給 CLI，
+    /// 回呼依登記順序編號為 <c>hook_0</c>、<c>hook_1</c>…；CLI 觸發時以 <c>hook_callback</c> 呼叫。
+    /// 同一個事件的多個 matcher 會被 CLI <b>同時</b>觸發，回呼也就可能同時在跑，彼此不要依賴先後。
+    /// 參考 https://docs.anthropic.com/en/docs/claude-code/hooks。
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<HookMatcher>> Hooks { get; init; } =
+        ReadOnlyDictionary<string, IReadOnlyList<HookMatcher>>.Empty;
 
     /// <summary>額外的環境變數，蓋過繼承自目前程序的同名變數。</summary>
     public IReadOnlyDictionary<string, string> Env { get; init; } = ReadOnlyDictionary<string, string>.Empty;

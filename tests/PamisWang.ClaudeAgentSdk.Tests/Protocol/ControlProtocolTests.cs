@@ -238,12 +238,12 @@ public sealed class ControlProtocolTests : IAsyncLifetime, IAsyncDisposable
     {
         Start();
 
-        _transport.Push("""{"type":"control_request","request_id":"cli_1","request":{"subtype":"hook_callback","callback_id":"hook_0"}}""");
+        _transport.Push("""{"type":"control_request","request_id":"cli_1","request":{"subtype":"future_thing"}}""");
         var response = (await _transport.NextWriteAsync()).GetProperty("response");
 
         Assert.Equal("error", response.GetProperty("subtype").GetString());
         Assert.Equal("cli_1", response.GetProperty("request_id").GetString());
-        Assert.Contains("hook_callback", response.GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Contains("future_thing", response.GetProperty("error").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]

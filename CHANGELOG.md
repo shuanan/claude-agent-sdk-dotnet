@@ -12,6 +12,16 @@
   跟 Python 不同的地方：參數驗證只實作常用的 JSON Schema 關鍵字（沒有 `$ref`、`format`）；
   不能像 Python 那樣放自己組的 MCP `Server`，也沒有 server 停掉後重新握手的流程。
 - `ClaudeAgent.QueryAsync`：有 SDK MCP server 時也留著 stdin 到第一個結果（對應 Python 的 `_has_bidirectional_needs`）。
+- Hook，對應 Python 的 `hooks`：`ClaudeAgentOptions.Hooks`（事件 → `HookMatcher` 清單）、`HookEvent`（Python `HookEvent` 的 10 個事件）、
+  `HookCallback`（`input`、`toolUseId`、`HookContext`、`CancellationToken`）。
+  輸入依 `hook_event_name` 轉成 `PreToolUseHookInput`、`PostToolUseHookInput`、`PostToolUseFailureHookInput`、`UserPromptSubmitHookInput`、
+  `StopHookInput`、`SubagentStopHookInput`、`PreCompactHookInput`、`NotificationHookInput`、`SubagentStartHookInput`、`PermissionRequestHookInput`，
+  不認得的是 `UnknownHookInput`；都帶 `Raw`。結果是 `SyncHookOutput`／`AsyncHookOutput`／`RawHookOutput`，
+  `HookSpecificOutput` 有 Python 的全部 21 種（含 SessionStart、PostToolBatch、PermissionDenied、Elicitation、WorktreeCreate 等）。
+  initialize 跟 Python 一樣送 `hooks`（`hookCallbackIds` 依登記順序是 `hook_<n>`、有逾時才送 `timeout`、空的事件不送、沒有就是 `null`）；
+  `hook_callback` 回覆與錯誤以 Python SDK 實際的輸出為準（`HookGoldenParityTests`）。回呼各自在背景跑，慢的不會擋住其他請求；
+  `control_cancel_request` 會取消它、不送回應。有 hook 時 `ClaudeAgent.QueryAsync` 留著 stdin 到第一個結果。
+  跟 Python 不同的地方：`HookContext.Signal` 是真的會取消的 `CancellationToken`（Python 一律是 `None`）；回呼回傳 `null` 時回錯誤。
 - `tools/local-ci.sh`：在本機跑跟 CI 一樣的建置、測試與打包。
 
 ## 0.1.0-preview.3（2026-10-31）

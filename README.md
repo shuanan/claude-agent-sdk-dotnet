@@ -140,6 +140,50 @@ await foreach (var message in ClaudeAgent.QueryAsync("1.5 加 2 是多少？", o
 - 有 SDK MCP server 時，`ClaudeAgent.QueryAsync` 會留著 stdin 到第一個 `ResultMessage` 才關，讓 CLI 在回合中呼叫工具。
   With an SDK MCP server, `ClaudeAgent.QueryAsync` keeps stdin open until the first `ResultMessage` so the CLI can call the tools during the turn.
 
+### Hook
+
+在 Claude Code 的事件上跑你的程式，例如擋下工具、記錄工具的結果；對應 Python 的 `hooks` 與 `HookMatcher`。
+Run your own code on Claude Code events, such as blocking a tool or observing its result; this mirrors Python's `hooks` and `HookMatcher`.
+
+```csharp
+using PamisWang.ClaudeAgentSdk;
+using PamisWang.ClaudeAgentSdk.Hooks;
+
+var options = new ClaudeAgentOptions
+{
+    Hooks = new Dictionary<string, IReadOnlyList<HookMatcher>>
+    {
+        // 擋下所有 Bash / Deny every Bash call
+        [HookEvent.PreToolUse] = [new HookMatcher("Bash", (input, toolUseId, context, ct) =>
+            ValueTask.FromResult<HookOutput>(new SyncHookOutput
+            {
+                HookSpecificOutput = new PreToolUseHookSpecificOutput
+                {
+                    PermissionDecision = "deny",
+                    PermissionDecisionReason = "這裡不能用 Bash / Bash is not allowed here",
+                },
+            }))],
+        // 看 Read 讀了什麼 / Observe what Read returned
+        [HookEvent.PostToolUse] = [new HookMatcher("Read", (input, toolUseId, context, ct) =>
+        {
+            var read = (PostToolUseHookInput)input;
+            Console.WriteLine($"Read {read.ToolInput.GetProperty("file_path")}: {read.ToolResponse}");
+            return ValueTask.FromResult(HookOutput.Empty);
+        })],
+    },
+};
+```
+
+- 輸入依事件是對應的型別（`PreToolUseHookInput`、`StopHookInput`…），不認得的事件是 `UnknownHookInput`；原始 JSON 都在 `Raw`。
+  Inputs are typed per event (`PreToolUseHookInput`, `StopHookInput`, …); unknown events arrive as `UnknownHookInput`, and the original JSON is always in `Raw`.
+- 結果：`SyncHookOutput`（`Continue`、`StopReason`、`Decision`、`SystemMessage`、`Reason`、`HookSpecificOutput`）、
+  `AsyncHookOutput`（`{"async": true}`），或自己組 JSON 的 `RawHookOutput`。回呼丟出例外時 CLI 收到的是錯誤回應。
+  Results: `SyncHookOutput`, `AsyncHookOutput` (`{"async": true}`), or `RawHookOutput` for hand-built JSON. An exception thrown by a callback becomes an error response to the CLI.
+- 同一個事件的多個 matcher 會被 CLI 同時觸發，回呼可能同時在跑；CLI 撤回時 `CancellationToken` 會被取消，不送回應。
+  The CLI fires all matchers of one event concurrently, so callbacks may run in parallel; when the CLI withdraws a call the `CancellationToken` is cancelled and no response is sent.
+- initialize 送出的設定與每種回應都跟 Python SDK 實際的輸出比對過（`HookGoldenParityTests`）。有 hook 時 `ClaudeAgent.QueryAsync` 一樣留著 stdin 到第一個結果。
+  The initialize payload and every response are checked against the real Python SDK (`HookGoldenParityTests`). With hooks, `ClaudeAgent.QueryAsync` keeps stdin open until the first result.
+
 ## 範圍 / Scope
 
 支援 / Supported:
@@ -155,8 +199,9 @@ await foreach (var message in ClaudeAgent.QueryAsync("1.5 加 2 是多少？", o
 - 對話中途套用設定，例如換思考深度（`apply_flag_settings`；Python SDK 沒有，照 TypeScript SDK 的協定） / Applying settings mid-conversation, such as the effort level (`apply_flag_settings`; missing from the Python SDK, follows the TypeScript SDK's protocol)
 - 對話中途換權限模式（`SetPermissionModeAsync`）；一次性問答 `ClaudeAgent.QueryAsync`（對應 Python 的 `query()`） / Switching the permission mode mid-conversation (`SetPermissionModeAsync`); one-shot `ClaudeAgent.QueryAsync` (Python's `query()`)
 - 跟 Python 一樣的其他選項 / Further options matching Python: `Tools`, `AllowedTools`, `MaxTurns`, `MaxBudgetUsd`, `FallbackModel`, `Betas`, `PermissionPromptToolName`, `PermissionMode`, `ContinueConversation`, `SessionId`, `Settings` + `Sandbox`, `AddDirs`, `McpServers`（外部的 stdio/SSE/HTTP，以及 SDK MCP server / external stdio/SSE/HTTP, plus in-process SDK MCP servers）/ `McpConfig`, `StrictMcpConfig`, `ForkSession`, `SettingSources`, `Plugins`, `ExtraArgs`, `Thinking` / `MaxThinkingTokens`, `OutputFormat`, `Agents`
+- Hook 回呼（`Hooks`），所有 Python 有的事件輸入與事件專屬結果 / Hook callbacks (`Hooks`) with every hook input and hook-specific output type Python has
 
-不做 / Not planned: hook 回呼、session store、transcript mirror / hook callbacks, session stores, transcript mirroring.
+不做 / Not planned: session store、transcript mirror / session stores, transcript mirroring.
 
 ## 需求 / Requirements
 
