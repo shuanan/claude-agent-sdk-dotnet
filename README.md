@@ -184,6 +184,38 @@ var options = new ClaudeAgentOptions
 - initialize 送出的設定與每種回應都跟 Python SDK 實際的輸出比對過（`HookGoldenParityTests`）。有 hook 時 `ClaudeAgent.QueryAsync` 一樣留著 stdin 到 run 結束。
   The initialize payload and every response are checked against the real Python SDK (`HookGoldenParityTests`). With hooks, `ClaudeAgent.QueryAsync` keeps stdin open until the first result.
 
+### Session 紀錄 / On-disk sessions
+
+讀寫 Claude Code 存在本機的 session（`~/.claude/projects/<專案>/<sessionId>.jsonl`），不用啟動 CLI；對應 Python 的 `list_sessions()`、`get_session_messages()` 等。
+Read and edit the sessions Claude Code stores on disk without starting the CLI; this mirrors Python's `list_sessions()`, `get_session_messages()` and friends.
+
+```csharp
+using PamisWang.ClaudeAgentSdk.Sessions;
+
+foreach (var session in ClaudeSessions.ListSessions(directory: "/path/to/project", limit: 20))
+{
+    Console.WriteLine($"{session.SessionId} {session.Summary} {session.GitBranch}");
+}
+
+var messages = ClaudeSessions.GetSessionMessages(sessionId, directory: "/path/to/project");
+ClaudeSessions.RenameSession(sessionId, "重構登入流程 / Login refactor");
+ClaudeSessions.TagSession(sessionId, "experiment");
+var fork = ClaudeSessions.ForkSession(sessionId, upToMessageId: messages[1].Uuid);
+```
+
+- `ListSessions`、`GetSessionInfo`、`GetSessionMessages`、`ListSubagents`、`GetSubagentMessages`、`ProjectKeyForDirectory`、
+  `RenameSession`、`TagSession`、`DeleteSession`、`ForkSession`、`FoldSessionSummary`；全部同步，跟 Python 一樣。
+  All synchronous, like Python.
+- `directory` 是專案路徑；有給時也找同一個 git repo 的其他 worktree（`git worktree list`），沒給時找所有專案。
+  `directory` is the project path; when given, the other worktrees of the same git repo are searched too, otherwise every project is.
+- 設定資料夾依序是 `claudeConfigDir` 參數（.NET 版多的）、`CLAUDE_CONFIG_DIR`、`~/.claude`。
+  The config directory is the `claudeConfigDir` argument (a .NET addition), then `CLAUDE_CONFIG_DIR`, then `~/.claude`.
+- 行為照 Python SDK 的實作與它的測試（1:1 移植成 xUnit）：資料夾命名與長路徑雜湊、只讀開頭結尾 64 KiB 的摘要、
+  平行工具呼叫的補回、寫出的 JSON 跟 Python 的 `json.dumps` 逐位元組相同。Python 的 `ValueError` 在這裡是 `ArgumentException`。
+  Behavior follows the Python SDK's implementation and its own test suite (ported 1:1 to xUnit): directory naming and long-path hashing,
+  64 KiB head/tail metadata reads, recovery of parallel tool calls, and JSON written byte-for-byte like Python's `json.dumps`.
+  Python's `ValueError` is `ArgumentException` here.
+
 ## 範圍 / Scope
 
 支援 / Supported:
@@ -204,8 +236,12 @@ var options = new ClaudeAgentOptions
 - Hook 回呼（`Hooks`），所有 Python 有的事件輸入與事件專屬結果 / Hook callbacks (`Hooks`) with every hook input and hook-specific output type Python has
 - 對話中的控制 / In-session controls: `RewindFilesAsync`, `ReconnectMcpServerAsync`, `ToggleMcpServerAsync`, `StopTaskAsync`, `GetMcpStatusAsync`, `GetContextUsageAsync`, `GetServerInfoAsync`
 - 連線前檢查 CLI 版本，太舊時經由 `Warning` 警告（`CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK` 跳過） / CLI version check before connecting, warning through `Warning` (skip with `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK`)
+- 本機的 session 紀錄（`ClaudeSessions`）：列出、讀訊息與 subagent、改名、標籤、刪除、分支 / On-disk sessions (`ClaudeSessions`): list, read messages and subagents, rename, tag, delete, fork
 
-不做 / Not planned: session store、transcript mirror / session stores, transcript mirroring.
+不做 / Not planned: session store（`SessionStore`、`InMemorySessionStore`、`*_from_store`／`*_via_store`、`import_session_to_store`、
+用 store resume 時的檔案還原、`load_timeout_ms`）、transcript mirror /
+session stores (`SessionStore`, `InMemorySessionStore`, the `*_from_store` / `*_via_store` variants, `import_session_to_store`,
+store-backed resume materialization, `load_timeout_ms`), transcript mirroring.
 
 ## 需求 / Requirements
 
