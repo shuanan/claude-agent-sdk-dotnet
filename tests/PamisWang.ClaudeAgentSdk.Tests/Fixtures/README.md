@@ -34,7 +34,7 @@ Claude Code CLI 的 stream-json 收發紀錄，給單元測試用假的 transpor
 ## 錄製條件
 
 - 模型用 haiku，對話都很短。
-- 跟 chibi-office 的 `chat.ts` 一樣：一律掛權限回呼（`--permission-prompt-tool stdio`）、停用 `AskUserQuestion`。
+- 模擬有自己畫面的應用程式：一律掛權限回呼（`--permission-prompt-tool stdio`）；畫面上沒有回答選擇題的介面，所以停用 `AskUserQuestion`。
 - 不載入使用者的設定與 claude.ai 連接器（`--setting-sources=`、`--strict-mcp-config`），所以 `init` 訊息裡的工具、外掛、指令都只有內建的。
 - 去識別化：
 
@@ -45,6 +45,7 @@ Claude Code CLI 的 stream-json 收發紀錄，給單元測試用假的 transpor
   | 這兩者在 `~/.claude/projects` 底下的資料夾名稱 | `<CWD-PROJECT-DIR>`、`<HOME-PROJECT-DIR>` |
   | email | `user@example.com` |
   | 帳號所屬組織 | `Example Org` |
+  | 訂閱方案 | `Claude Pro` |
 
 ## 重錄
 
