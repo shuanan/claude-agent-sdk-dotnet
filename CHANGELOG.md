@@ -23,6 +23,23 @@
   `control_cancel_request` 會取消它、不送回應。有 hook 時 `ClaudeAgent.QueryAsync` 留著 stdin 到第一個結果。
   跟 Python 不同的地方：`HookContext.Signal` 是真的會取消的 `CancellationToken`（Python 一律是 `None`）；回呼回傳 `null` 時回錯誤。
 - `tools/local-ci.sh`：在本機跑跟 CI 一樣的建置、測試與打包。
+- `ClaudeAgentClient` 的控制方法，對應 Python `ClaudeSDKClient`：`RewindFilesAsync`（`rewind_files`）、`ReconnectMcpServerAsync`（`mcp_reconnect`）、
+  `ToggleMcpServerAsync`（`mcp_toggle`）、`StopTaskAsync`（`stop_task`）、`GetMcpStatusAsync`（`mcp_status` → `McpStatusResponse`）、
+  `GetContextUsageAsync`（`get_context_usage` → `ContextUsageResponse`）、`GetServerInfoAsync`（存下的 initialize 回應；沒連線時跟 Python 一樣丟出 `CliConnectionException`）。
+  回應型別照 Python 的 TypedDict 寬鬆地讀，都帶 `Raw`。`TaskLifecycle.TerminalStatuses` 對應 `TERMINAL_TASK_STATUSES`。
+- 選項，對應 Python `ClaudeAgentOptions`：`Skills`（`SkillsAll`／`SkillsList`，名稱檢查與補進 `--allowedTools`、預設 `--setting-sources=user,project` 跟 Python 一樣，
+  清單才在 initialize 送 `skills`）、`TaskBudget`（`--task-budget`）、`IncludeHookEvents`（`--include-hook-events`）、
+  `ResumeSessionAt`／`ResumeDropsTurn`（`--resume-session-at=`／`--resume-drops-turn=`，Windows 擋 cmd.exe 特殊字元）、`ForwardSubagentText`（initialize `forwardSubagentText`）、
+  `VerbatimPrompts`（每則使用者訊息標上 `client_composed: true`）、`EnableFileCheckpointing`（`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=true`）、
+  `User`（`ProcessStartInfo.UserName`；Windows 丟出 `PlatformNotSupportedException`）、`SystemPromptPreset.ExcludeDynamicSections`／`Snapshot` 與
+  `SystemPromptCustom.Snapshot`（initialize `excludeDynamicSections`／`systemPromptSnapshot`）、`Warning`（SDK 自己的警告，沒指定時寫到 stderr）。
+  argv、initialize 與訊息標記以 Python SDK 實際的輸出為準（`RemainingOptionsGoldenParityTests`）。
+- 連線前跟 Python 一樣以 `claude -v` 檢查版本（最低 2.0.0；開了 `VerbatimPrompts` 時 2.1.248），太舊只警告；`CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK` 跳過。
+  `Settings` 檔案不存在或 JSON 解析失敗（有 `Sandbox` 時）也跟 Python 一樣警告。
+- `ClaudeAgent.QueryAsync` 關 stdin 的時機改成跟 Python 的 `wait_for_result_and_end_input` 一樣：追蹤 `local_agent`／`local_workflow` 背景工作
+  （`task_started`、`task_notification`、`task_updated` 的結束狀態），看 `session_state_changed` 的 `idle`，結果之後一直 running 時以
+  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`（預設 10 分鐘、`0` 不限）為上限。以前是收到第一個結果就關，背景工作之後的 hook 與 SDK MCP 呼叫會失敗。
+- 跟 Python 不同的地方：沒有 `load_timeout_ms`（只用在 session store）與已經不用的 `debug_stderr`；`skills` 給字串的 TypeError 在 C# 寫不出來。
 
 ## 0.1.0-preview.3（2026-10-31）
 

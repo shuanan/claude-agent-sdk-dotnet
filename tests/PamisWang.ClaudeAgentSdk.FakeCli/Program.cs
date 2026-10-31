@@ -11,6 +11,13 @@ using var stdin = Console.OpenStandardInput();
 using var stdout = Console.OpenStandardOutput();
 using var stderr = Console.OpenStandardError();
 
+// SDK 連線前的版本檢查（claude -v）：回報一個夠新的版本就結束，不進入下面的模式
+if (args is ["-v"])
+{
+    WriteText(stdout, "2.1.312 (Claude Code)\n");
+    return 0;
+}
+
 switch (mode)
 {
     case "echo":
@@ -56,11 +63,12 @@ static string Report(string[] args)
         "CLAUDE_AGENT_SDK_VERSION",
         "CLAUDE_AGENT_SDK_CLIENT_APP",
         "CLAUDE_CODE_SDK_READS_SESSION_STATE",
+        "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING",
         "PWD",
         "FAKE_CLAUDE_EXTRA",
     ];
     var env = names.ToDictionary(name => name, name => Environment.GetEnvironmentVariable(name));
-    return JsonSerializer.Serialize(new { type = "fake_report", argv = args, cwd = Environment.CurrentDirectory, env });
+    return JsonSerializer.Serialize(new { type = "fake_report", argv = args, cwd = Environment.CurrentDirectory, user = Environment.UserName, env });
 }
 
 // 最小的 CLI：回覆 initialize、interrupt 與 set_model；每收到一句話就回一則 assistant 與一個 result。

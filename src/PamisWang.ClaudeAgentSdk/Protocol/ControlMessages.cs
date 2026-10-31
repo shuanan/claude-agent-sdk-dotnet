@@ -34,8 +34,11 @@ internal static class ControlMessages
     public static string Error(string requestId, string error) =>
         Response(requestId, "error", writer => writer.WriteString("error", error));
 
-    /// <summary>使用者說的一句話。</summary>
-    public static string UserMessage(string content, string sessionId) =>
+    /// <summary>
+    /// 使用者說的一句話。<paramref name="clientComposed"/> 對應 Python 的 <c>stamp_user_message</c>：
+    /// 開了 <see cref="ClaudeAgentOptions.VerbatimPrompts"/> 時在最後加上 <c>"client_composed": true</c>，沒開就不加這個欄位。
+    /// </summary>
+    public static string UserMessage(string content, string sessionId, bool clientComposed = false) =>
         Line(writer =>
         {
             writer.WriteString("type", "user");
@@ -45,6 +48,10 @@ internal static class ControlMessages
             writer.WriteEndObject();
             writer.WriteNull("parent_tool_use_id");
             writer.WriteString("session_id", sessionId);
+            if (clientComposed)
+            {
+                writer.WriteBoolean("client_composed", true);
+            }
         });
 
     private static string Response(string requestId, string subtype, Action<Utf8JsonWriter> writeFields) =>

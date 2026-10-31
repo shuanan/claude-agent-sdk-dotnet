@@ -22,8 +22,10 @@ public static class ClaudeAgent
     /// 啟動 Claude Code、送出 <paramref name="prompt"/>，逐則回傳 CLI 送來的訊息，直到 CLI 結束；結束或中途停止讀取時關閉 CLI。
     /// 對應 Python SDK 的 <c>query()</c>：沒有 <see cref="ClaudeAgentOptions.CanUseTool"/>、<see cref="ClaudeAgentOptions.Hooks"/>
     /// 也沒有 SDK MCP server（<see cref="Mcp.McpSdkServerConfig"/>）時送出後就關 stdin；
-    /// 有的話要留著 stdin 回覆權限詢問、hook 與工具呼叫，收到第一個 <see cref="ResultMessage"/> 才關
-    /// （Python 還會等背景工作結束，這裡沒有）。
+    /// 有的話要留著 stdin 回覆權限詢問、hook 與工具呼叫，等到整個 run 結束才關：
+    /// 結果之後 CLI 回報 <c>idle</c>（<c>session_state_changed</c>），或不回報 session state 的舊版 CLI 送來結果、又沒有追蹤中的背景 agent。
+    /// 背景 agent（<c>local_agent</c>、<c>local_workflow</c>）還在跑時，結果只代表一輪結束，stdin 照樣留著。
+    /// 結果之後 CLI 一直回報 running 卻沒有新的一輪時，最多等 <c>CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS</c>（預設 10 分鐘，<c>0</c> 不限）。
     /// </summary>
     /// <exception cref="CliNotFoundException">找不到 Claude Code。</exception>
     /// <exception cref="CliConnectionException">啟動失敗，或 CLI 在握手完成前就結束。</exception>
@@ -51,22 +53,11 @@ public static class ClaudeAgent
             await client.ConnectAsync(cancellationToken).ConfigureAwait(false);
             await client.SendWithSessionIdAsync(prompt, sessionId: "", cancellationToken).ConfigureAwait(false);
 
-            // 沒有要回覆 CLI 的回呼、hook 或 SDK MCP server，就不必留著 stdin。對應 Python 的 wait_for_result_and_end_input
-            var inputEnded = false;
-            if (!client.HasBidirectionalNeeds)
-            {
-                await client.EndInputAsync(cancellationToken).ConfigureAwait(false);
-                inputEnded = true;
-            }
+            // 跟 Python 一樣在背景等 run 結束再關 stdin：沒有要回覆 CLI 的回呼、hook 或 SDK MCP server 就馬上關
+            client.StartWaitForResultAndEndInput();
 
             await foreach (var message in client.ReceiveMessagesAsync(cancellationToken).ConfigureAwait(false))
             {
-                if (!inputEnded && message is ResultMessage)
-                {
-                    await client.EndInputAsync(cancellationToken).ConfigureAwait(false);
-                    inputEnded = true;
-                }
-
                 yield return message;
             }
         }
