@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using PamisWang.ClaudeAgentSdk.Messages;
 using PamisWang.ClaudeAgentSdk.Permissions;
 using PamisWang.ClaudeAgentSdk.Tests.Protocol;
@@ -121,6 +122,52 @@ public sealed class ClaudeAgentClientTests : IDisposable
     }
 
     [Fact]
+    public async Task SetModelAsync_FakeCliProcess_LaterRepliesUseNewModel()
+    {
+        var options = new ClaudeAgentOptions
+        {
+            CliPath = FakeClaude.Path,
+            Cwd = _cwd.Path,
+            Env = new Dictionary<string, string> { ["FAKE_CLAUDE_MODE"] = "chat" },
+        };
+        await using var client = new ClaudeAgentClient(options);
+        await client.ConnectAsync().WaitAsync(Timeout);
+
+        var switchedTo = await client.SetModelAsync("sonnet").WaitAsync(Timeout);
+        await client.SendAsync("你好");
+        var switched = await CollectAsync(client.ReceiveResponseAsync());
+        var resetTo = await client.SetModelAsync().WaitAsync(Timeout);
+        await client.SendAsync("你好");
+        var reset = await CollectAsync(client.ReceiveResponseAsync());
+
+        Assert.Equal("sonnet", switchedTo);
+        Assert.Equal("sonnet", switched.OfType<AssistantMessage>().Single().Model);
+        Assert.Equal("fake", resetTo);
+        Assert.Equal("fake", reset.OfType<AssistantMessage>().Single().Model);
+    }
+
+    [Fact]
+    public async Task SetModelAsync_RecordedSwitch_ReturnsResolvedModelAndNextTurnUsesIt()
+    {
+        var fixture = ProtocolFixture.Load("set_model");
+        await using var client = new ClaudeAgentClient(new ClaudeAgentOptions(), new ReplayTransport(fixture));
+        await client.ConnectAsync();
+
+        await client.SendAsync(fixture.UserPrompts[0]);
+        await CollectAsync(client.ReceiveResponseAsync());
+        var model = await client.SetModelAsync("sonnet");
+        await client.SendAsync(fixture.UserPrompts[1]);
+        var messages = await CollectAsync(client.ReceiveResponseAsync());
+
+        Assert.Equal("claude-sonnet-5-5", model);
+        // CLI 把換模型的結果當成一則重播的使用者訊息送來
+        var notice = messages.OfType<UserMessage>().Single();
+        Assert.True(notice.Raw.GetProperty("isReplay").GetBoolean());
+        Assert.Contains("Set model to", notice.Content.OfType<TextBlock>().Single().Text, StringComparison.Ordinal);
+        Assert.Equal("claude-sonnet-5-5", messages.OfType<AssistantMessage>().Single().Model);
+    }
+
+    [Fact]
     public async Task SendAsync_BeforeConnect_ThrowsCliConnectionException()
     {
         await using var client = new ClaudeAgentClient(new ClaudeAgentOptions(), new ScriptedTransport());
@@ -142,6 +189,8 @@ public sealed class ClaudeAgentClientTests : IDisposable
         Assert.False(client.IsConnected);
         await Assert.ThrowsAsync<ObjectDisposedException>(() => client.SendAsync("你好"));
         await Assert.ThrowsAsync<ObjectDisposedException>(() => client.InterruptAsync());
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => client.SetModelAsync("sonnet"));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => client.ApplyFlagSettingsAsync(new JsonObject { ["effortLevel"] = "low" }));
         await Assert.ThrowsAsync<ObjectDisposedException>(() => client.ConnectAsync());
     }
 

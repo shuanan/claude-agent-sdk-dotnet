@@ -28,6 +28,8 @@ Claude Code CLI 的 stream-json 收發紀錄，給單元測試用假的 transpor
 | `permission_always_allow.jsonl` | 權限詢問：把 CLI 給的建議權限帶回去（一律允許），下一輪同一工具不再問 |
 | `interrupt.jsonl` | 模型輸出到一半時中斷，再接著說一句 |
 | `interrupt_during_permission.jsonl` | 等權限回覆時中斷 |
+| `set_model.jsonl` | 對話中途換模型（`set_model`）再說一句，最後換回預設（`model` 是 `null`） |
+| `apply_flag_settings.jsonl` | 對話中途改思考深度（`apply_flag_settings`）再說一句，最後清掉；Python SDK 沒有公開的方法，腳本直接用它內部送 control request 的函式 |
 
 ## 錄製條件
 
@@ -47,6 +49,16 @@ Claude Code CLI 的 stream-json 收發紀錄，給單元測試用假的 transpor
 ## 重錄
 
 Claude Code 升級後重錄一次，再用 `git diff` 看協定改了什麼。uuid、session id、耗時和模型的回答每次都不一樣，看 diff 時注意的是訊息型別與欄位有沒有增減。
+
+第一次要準備對照版本的 Python SDK。從原始碼安裝：沒有打包的 CLI，才會用 PATH 上的 `claude`，錄到的是本機的版本。
+
+```bash
+git clone https://github.com/anthropics/claude-agent-sdk-python D:/SideProject/claude-agent-sdk-python
+cd D:/SideProject/claude-agent-sdk-python
+git checkout v0.2.174
+uv venv --python 3.12
+uv pip install -e .
+```
 
 ```bash
 D:/SideProject/claude-agent-sdk-python/.venv/Scripts/python -I tools/record_fixtures.py            # 全部

@@ -253,6 +253,29 @@ async def interrupt_during_permission(s: Session) -> None:
         await interrupter
 
 
+async def set_model(s: Session) -> None:
+    async with s.client() as client:
+        await turn(client, "只回答「好」。")
+        s.recorder.note("換成 sonnet，再說一句")
+        await client.set_model("sonnet")
+        await turn(client, "只回答「好」。")
+        # 不再說話：只看 CLI 接不接受 null，不多花一輪
+        s.recorder.note("換回預設（model 是 null）")
+        await client.set_model(None)
+
+
+async def apply_flag_settings(s: Session) -> None:
+    # Python SDK 沒有公開的方法（對應 TypeScript SDK 的 applyFlagSettings()），直接用內部送 control request 的函式
+    async with s.client() as client:
+        query = client._query  # noqa: SLF001
+        assert query is not None
+        s.recorder.note("思考深度改成 low，再說一句")
+        await query._send_control_request({"subtype": "apply_flag_settings", "settings": {"effortLevel": "low"}})  # noqa: SLF001
+        await turn(client, "只回答「好」。")
+        s.recorder.note("effortLevel 給 null，回到模型預設的深度")
+        await query._send_control_request({"subtype": "apply_flag_settings", "settings": {"effortLevel": None}})  # noqa: SLF001
+
+
 @dataclass(frozen=True)
 class Scenario:
     name: str
@@ -270,6 +293,8 @@ SCENARIOS = [
     Scenario("permission_always_allow", "權限詢問：一律允許後，同一工具不再問", permission_always_allow),
     Scenario("interrupt", "模型輸出到一半時中斷，再接著說一句", interrupt),
     Scenario("interrupt_during_permission", "等權限回覆時中斷（CLI 送 control_cancel_request）", interrupt_during_permission),
+    Scenario("set_model", "對話中途換模型，再換回預設（set_model）", set_model),
+    Scenario("apply_flag_settings", "對話中途改思考深度，再清掉（apply_flag_settings，Python SDK 沒有公開的方法）", apply_flag_settings),
 ]
 
 

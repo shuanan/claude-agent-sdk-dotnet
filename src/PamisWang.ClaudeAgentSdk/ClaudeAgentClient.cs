@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using PamisWang.ClaudeAgentSdk.Messages;
 using PamisWang.ClaudeAgentSdk.Protocol;
 using PamisWang.ClaudeAgentSdk.Transport;
@@ -174,6 +175,30 @@ public sealed class ClaudeAgentClient : IAsyncDisposable
     /// <summary>中斷這一輪。對話還在，之後可以接著 <see cref="SendAsync"/>；被中斷的那一輪仍會送來一個出錯的 <see cref="ResultMessage"/>。</summary>
     public Task InterruptAsync(CancellationToken cancellationToken = default) =>
         RequireProtocol().InterruptAsync(cancellationToken);
+
+    /// <summary>
+    /// 換模型：之後的回覆改用 <paramref name="model"/>（例如 <c>sonnet</c> 或完整的模型 ID），<see langword="null"/> 回到 Claude Code 的預設。
+    /// 對話還在，不用重新連線。對應 Python 的 <c>set_model()</c>。
+    /// 回傳 CLI 換過去的完整模型 ID（例如 <c>sonnet</c> 是 <c>claude-sonnet-5-5</c>），CLI 沒回報時是 <see langword="null"/>；
+    /// Python 與 TypeScript SDK 不回傳這個值。CLI 也會送來一則重播的 <see cref="UserMessage"/>（原始 JSON 的 <c>isReplay</c> 是 <see langword="true"/>），
+    /// 內容是 <c>&lt;local-command-stdout&gt;Set model to …&lt;/local-command-stdout&gt;</c>。
+    /// </summary>
+    public Task<string?> SetModelAsync(string? model = null, CancellationToken cancellationToken = default) =>
+        RequireProtocol().SetModelAsync(model, cancellationToken);
+
+    /// <summary>
+    /// 對話中途套用設定，鍵與值跟 Claude Code 的 <c>settings.json</c> 一樣。設定合併進這個 session 的 flag 設定層
+    /// （優先於使用者、專案、本機的設定檔，低於組織的管理設定），不寫進設定檔。
+    /// 每次呼叫淺層合併最上層的鍵；值給 JSON 的 <c>null</c> 就清掉那個鍵，回到較低層的設定。
+    /// 例如 <c>new JsonObject { ["effortLevel"] = "high" }</c> 換思考深度（也接受只在這個 session 有效的 <c>max</c>），
+    /// <c>effortLevel</c> 給 <c>null</c> 回到模型預設的深度。
+    /// Python SDK 沒有這個功能，對應 TypeScript SDK 的 <c>applyFlagSettings()</c>。
+    /// </summary>
+    public Task ApplyFlagSettingsAsync(JsonObject settings, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        return RequireProtocol().ApplyFlagSettingsAsync(settings, cancellationToken);
+    }
 
     /// <summary>關閉：取消等待中的權限詢問、關閉 stdin 讓 CLI 寫完 session 後結束，逾時才強制結束。</summary>
     public async ValueTask DisposeAsync()

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using PamisWang.ClaudeAgentSdk.Permissions;
 using PamisWang.ClaudeAgentSdk.Transport;
@@ -9,7 +10,7 @@ using PamisWang.ClaudeAgentSdk.Transport;
 namespace PamisWang.ClaudeAgentSdk.Protocol;
 
 /// <summary>
-/// 在 transport 上跑 control 協定：初始化握手、讀取迴圈分流、回覆 CLI 的權限詢問、送出中斷。
+/// 在 transport 上跑 control 協定：初始化握手、讀取迴圈分流、回覆 CLI 的權限詢問、送出中斷、換模型與套用設定。
 /// 對應 Python SDK 的 <c>Query</c> 裡互動式 client 用到的部分；
 /// 一次性 <c>query()</c> 用來判斷何時關 stdin 的 run 生命週期（session state、上限計時）不在這裡，互動式的 stdin 只在關閉時才關。
 /// </summary>
@@ -61,6 +62,30 @@ internal sealed class ControlProtocol : IAsyncDisposable
     /// <summary>中斷這一輪；對話還在，之後可以接著說。</summary>
     public Task InterruptAsync(CancellationToken cancellationToken = default) =>
         SendControlRequestAsync("interrupt", writeFields: null, DefaultRequestTimeout, cancellationToken);
+
+    /// <summary>換模型，之後的回覆改用新的模型；<see langword="null"/> 回到預設。回傳 CLI 換過去的完整模型 ID，沒回報時是 <see langword="null"/>。</summary>
+    public async Task<string?> SetModelAsync(string? model, CancellationToken cancellationToken = default)
+    {
+        var response = await SendControlRequestAsync(
+                "set_model",
+                writer => writer.WriteString("model", model),
+                DefaultRequestTimeout,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return GetString(response, "model");
+    }
+
+    /// <summary>把設定合併進這個 session 的 flag 設定層。</summary>
+    public Task ApplyFlagSettingsAsync(JsonObject settings, CancellationToken cancellationToken = default) =>
+        SendControlRequestAsync(
+            "apply_flag_settings",
+            writer =>
+            {
+                writer.WritePropertyName("settings");
+                settings.WriteTo(writer);
+            },
+            DefaultRequestTimeout,
+            cancellationToken);
 
     /// <summary>送出使用者說的一句話。</summary>
     public Task SendUserMessageAsync(string content, CancellationToken cancellationToken = default) =>

@@ -59,11 +59,13 @@ static string Report(string[] args)
     return JsonSerializer.Serialize(new { type = "fake_report", argv = args, cwd = Environment.CurrentDirectory, env });
 }
 
-// 最小的 CLI：回覆 initialize 與 interrupt；每收到一句話就回一則 assistant 與一個 result。
+// 最小的 CLI：回覆 initialize、interrupt 與 set_model；每收到一句話就回一則 assistant 與一個 result。
 // 收到「請求權限」時先發出權限詢問，等 SDK 回覆後，把回覆的 behavior 放進 result。
+// assistant 帶的模型是 set_model 最後換成的，沒換過或換回預設是 fake。
 static async Task ChatAsync(Stream stdin, Stream stdout)
 {
     const string session = "fake-session";
+    var model = "fake";
     using var reader = new StreamReader(stdin, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     while (await reader.ReadLineAsync() is { } line)
     {
@@ -72,7 +74,17 @@ static async Task ChatAsync(Stream stdin, Stream stdout)
         {
             case "control_request":
                 var subtype = message["request"]!["subtype"]!.GetValue<string>();
-                var data = subtype == "initialize" ? new JsonObject { ["claude_code_version"] = "fake" } : new JsonObject();
+                if (subtype == "set_model")
+                {
+                    model = message["request"]!["model"]?.GetValue<string>() ?? "fake";
+                }
+
+                var data = subtype switch
+                {
+                    "initialize" => new JsonObject { ["claude_code_version"] = "fake" },
+                    "set_model" => new JsonObject { ["model"] = model },
+                    _ => new JsonObject(),
+                };
                 Send(new JsonObject
                 {
                     ["type"] = "control_response",
@@ -116,7 +128,7 @@ static async Task ChatAsync(Stream stdin, Stream stdout)
                     ["type"] = "assistant",
                     ["message"] = new JsonObject
                     {
-                        ["model"] = "fake",
+                        ["model"] = model,
                         ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = $"收到：{text}" }),
                     },
                     ["parent_tool_use_id"] = null,

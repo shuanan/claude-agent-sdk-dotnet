@@ -15,8 +15,27 @@ internal static class CliArguments
     /// <exception cref="ArgumentException">Windows 上 <see cref="ClaudeAgentOptions.Resume"/> 含有 cmd.exe 的特殊字元。</exception>
     public static IReadOnlyList<string> Build(ClaudeAgentOptions options, bool isWindows)
     {
-        // 沒指定系統提示時傳空字串，不用 Claude Code 預設的系統提示；Python 與 TS SDK 都是這樣
-        List<string> args = ["--output-format", "stream-json", "--verbose", "--system-prompt", ""];
+        List<string> args = ["--output-format", "stream-json", "--verbose"];
+
+        switch (options.SystemPrompt)
+        {
+            case null:
+                // 沒指定系統提示時傳空字串，不用 Claude Code 預設的系統提示；Python 與 TS SDK 都是這樣
+                args.AddRange(["--system-prompt", ""]);
+                break;
+            case SystemPromptCustom custom:
+                args.AddRange(["--system-prompt", custom.Prompt]);
+                break;
+            case SystemPromptFile file:
+                args.AddRange(["--system-prompt-file", file.Path]);
+                break;
+            case SystemPromptPreset { Append: { } append }:
+                args.AddRange(["--append-system-prompt", append]);
+                break;
+            default:
+                // 只用預設的系統提示：不帶參數，CLI 就用自己的
+                break;
+        }
 
         if (options.DisallowedTools.Count > 0)
         {
@@ -48,6 +67,11 @@ internal static class CliArguments
         if (options.IncludePartialMessages)
         {
             args.Add("--include-partial-messages");
+        }
+
+        if (options.Effort is not null)
+        {
+            args.AddRange(["--effort", options.Effort]);
         }
 
         args.AddRange(["--input-format", "stream-json"]);

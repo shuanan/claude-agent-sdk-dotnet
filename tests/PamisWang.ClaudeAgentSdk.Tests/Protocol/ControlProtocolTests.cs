@@ -1,10 +1,11 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using PamisWang.ClaudeAgentSdk.Permissions;
 using PamisWang.ClaudeAgentSdk.Protocol;
 
 namespace PamisWang.ClaudeAgentSdk.Tests.Protocol;
 
-/// <summary>樣本裡沒有的情況：錯誤回應、逾時、讀取失敗、不支援的請求、回呼出錯與關閉。</summary>
+/// <summary>樣本裡沒有的情況：錯誤回應、逾時、讀取失敗、不支援的請求、回呼出錯與關閉，以及換模型、套用設定送出的格式。</summary>
 public sealed class ControlProtocolTests : IAsyncLifetime, IAsyncDisposable
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
@@ -100,6 +101,36 @@ public sealed class ControlProtocolTests : IAsyncLifetime, IAsyncDisposable
         _protocol = new ControlProtocol(_transport, canUseTool: null);
 
         await Assert.ThrowsAsync<CliConnectionException>(() => _protocol.InterruptAsync());
+    }
+
+    [Theory]
+    [InlineData("sonnet", """{"subtype":"set_model","model":"sonnet"}""")]
+    [InlineData(null, """{"subtype":"set_model","model":null}""")]
+    public async Task SetModelAsync_SendsModelOrNullForDefault(string? model, string expectedRequest)
+    {
+        var protocol = Start();
+
+        var setting = protocol.SetModelAsync(model);
+        var request = await _transport.NextWriteAsync();
+        RespondSuccess(request);
+        await setting.WaitAsync(Timeout);
+
+        Assert.Equal(expectedRequest, request.GetProperty("request").GetRawText());
+    }
+
+    [Fact]
+    public async Task ApplyFlagSettingsAsync_SendsSettingsKeepingNullsThatClearKeys()
+    {
+        var protocol = Start();
+
+        var applying = protocol.ApplyFlagSettingsAsync(new JsonObject { ["effortLevel"] = "max", ["model"] = null });
+        var request = await _transport.NextWriteAsync();
+        RespondSuccess(request);
+        await applying.WaitAsync(Timeout);
+
+        Assert.Equal(
+            """{"subtype":"apply_flag_settings","settings":{"effortLevel":"max","model":null}}""",
+            request.GetProperty("request").GetRawText());
     }
 
     [Fact]
@@ -247,6 +278,9 @@ public sealed class ControlProtocolTests : IAsyncLifetime, IAsyncDisposable
         _protocol.Start();
         return _protocol;
     }
+
+    private void RespondSuccess(JsonElement request) =>
+        _transport.Push($$$"""{"type":"control_response","response":{"subtype":"success","request_id":"{{{request.GetProperty("request_id").GetString()}}}"}}""");
 
     private static string PermissionRequest(string requestId) =>
         $$$"""{"type":"control_request","request_id":"{{{requestId}}}","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"npm test"},"permission_suggestions":[],"tool_use_id":"toolu_1"}}""";

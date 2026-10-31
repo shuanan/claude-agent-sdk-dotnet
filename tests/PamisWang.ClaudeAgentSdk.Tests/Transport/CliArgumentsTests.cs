@@ -65,6 +65,74 @@ public sealed class CliArgumentsTests
     }
 
     [Fact]
+    public void Build_SystemPromptPreset_LeavesClaudeCodeDefault()
+    {
+        var args = CliArguments.Build(new ClaudeAgentOptions { SystemPrompt = new SystemPromptPreset() }, isWindows: false);
+
+        Assert.Equal(["--output-format", "stream-json", "--verbose", "--input-format", "stream-json"], args);
+    }
+
+    [Fact]
+    public void Build_SystemPromptPresetWithAppend_AppendsToDefault()
+    {
+        var options = new ClaudeAgentOptions { SystemPrompt = new SystemPromptPreset(Append: "回答一律用繁體中文") };
+
+        var args = CliArguments.Build(options, isWindows: false);
+
+        Assert.Equal(
+            ["--output-format", "stream-json", "--verbose", "--append-system-prompt", "回答一律用繁體中文", "--input-format", "stream-json"],
+            args);
+    }
+
+    [Fact]
+    public void Build_SystemPromptCustom_ReplacesDefaultAsOneArgument()
+    {
+        // 換行、引號、- 開頭都原樣放在一個參數裡；不經過 cmd.exe，Windows 上也不擋
+        const string prompt = "- 你是紫苑\n- 說話\"溫柔\" & 簡短";
+        var options = new ClaudeAgentOptions { SystemPrompt = new SystemPromptCustom(prompt), Model = "haiku" };
+
+        var args = CliArguments.Build(options, isWindows: true);
+
+        Assert.Equal(
+            [
+                "--output-format", "stream-json", "--verbose", "--system-prompt", prompt,
+                "--model", "haiku",
+                "--input-format", "stream-json",
+            ],
+            args);
+    }
+
+    [Fact]
+    public void Build_SystemPromptFile_PassesPath()
+    {
+        var options = new ClaudeAgentOptions { SystemPrompt = new SystemPromptFile(@"D:\prompts\紫苑.md") };
+
+        var args = CliArguments.Build(options, isWindows: true);
+
+        Assert.Equal(
+            ["--output-format", "stream-json", "--verbose", "--system-prompt-file", @"D:\prompts\紫苑.md", "--input-format", "stream-json"],
+            args);
+    }
+
+    [Fact]
+    public void Build_Effort_ComesAfterPartialMessagesLikePythonSdk()
+    {
+        var options = new ClaudeAgentOptions { Model = "haiku", Effort = "low", IncludePartialMessages = true };
+
+        var args = CliArguments.Build(options, isWindows: false);
+
+        Assert.Equal(
+            [
+                "--output-format", "stream-json", "--verbose", "--system-prompt", "",
+                "--model", "haiku",
+                "--include-partial-messages",
+                "--effort", "low",
+                "--input-format", "stream-json",
+            ],
+            args);
+    }
+
+    [Fact]
     public void Build_ResumeStartingWithDash_StaysOneArgument()
     {
         // 分成兩個參數的話，CLI 會把 --model 當成另一個旗標

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using PamisWang.ClaudeAgentSdk.Permissions;
 
 namespace PamisWang.ClaudeAgentSdk.Tests.Protocol;
@@ -161,6 +162,41 @@ public sealed class ControlProtocolReplayTests
             session.Transport.Writes.Select(message => message.GetProperty("type").GetString() == "user"
                 ? "user"
                 : message.GetProperty("request").GetProperty("subtype").GetString()));
+    }
+
+    [Fact]
+    public async Task SetModel_ReturnsResolvedModelAndLaterTurnUsesIt()
+    {
+        await using var session = await ReplaySession.StartAsync("set_model");
+
+        await session.SendNextUserMessageAsync();
+        await session.ReceiveUntilResultAsync();
+        var switched = await session.Protocol.SetModelAsync("sonnet");
+        await session.SendNextUserMessageAsync();
+        await session.ReceiveUntilResultAsync();
+        var reset = await session.Protocol.SetModelAsync(null);
+
+        Assert.Equal("claude-sonnet-5-5", switched);
+        Assert.Equal("claude-opus-5-5", reset);
+        Assert.Equal(
+            ["claude-haiku-5-5", "claude-sonnet-5-5"],
+            session.Received
+                .Where(message => message.GetProperty("type").GetString() == "assistant")
+                .Select(message => message.GetProperty("message").GetProperty("model").GetString()));
+    }
+
+    [Fact]
+    public async Task ApplyFlagSettings_CliAcceptsEffortAndClearingIt()
+    {
+        await using var session = await ReplaySession.StartAsync("apply_flag_settings");
+
+        await session.Protocol.ApplyFlagSettingsAsync(new JsonObject { ["effortLevel"] = "low" });
+        await session.SendNextUserMessageAsync();
+        var result = await session.ReceiveUntilResultAsync();
+        await session.Protocol.ApplyFlagSettingsAsync(new JsonObject { ["effortLevel"] = null });
+
+        Assert.Equal("success", result.GetProperty("subtype").GetString());
+        AssertSameMessages(session.ExpectedReceived, session.Received);
     }
 
     private static void AssertSameMessages(IReadOnlyList<JsonElement> expected, List<JsonElement> actual)

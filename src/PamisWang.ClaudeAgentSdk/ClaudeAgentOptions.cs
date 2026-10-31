@@ -19,8 +19,24 @@ public sealed class ClaudeAgentOptions
     /// </summary>
     public string? Cwd { get; init; }
 
-    /// <summary>模型，例如 <c>sonnet</c>、<c>haiku</c> 或完整的模型 ID。沒指定就用 Claude Code 的預設。</summary>
+    /// <summary>
+    /// 系統提示詞。沒指定時跟 Python SDK 一樣傳空的系統提示詞，不用 Claude Code 預設的；
+    /// 要跟在終端機用 Claude Code 時一樣，指定 <see cref="SystemPromptPreset"/>。
+    /// </summary>
+    public SystemPrompt? SystemPrompt { get; init; }
+
+    /// <summary>
+    /// 模型，例如 <c>sonnet</c>、<c>haiku</c> 或完整的模型 ID。沒指定就用 Claude Code 的預設。
+    /// 連線後可以用 <see cref="ClaudeAgentClient.SetModelAsync"/> 換。
+    /// </summary>
     public string? Model { get; init; }
+
+    /// <summary>
+    /// 思考的深度（<c>--effort</c>）：<c>low</c>、<c>medium</c>、<c>high</c>、<c>xhigh</c> 或 <c>max</c>。
+    /// 各模型支援哪些，見 <see cref="ClaudeAgentClient.ServerInfo"/> 裡 <c>models</c> 的 <c>supportedEffortLevels</c>。沒指定就用模型的預設。
+    /// 連線後可以用 <see cref="ClaudeAgentClient.ApplyFlagSettingsAsync"/> 的 <c>effortLevel</c> 換。
+    /// </summary>
+    public string? Effort { get; init; }
 
     /// <summary>要接續的 session ID（<c>--resume</c>）。</summary>
     public string? Resume { get; init; }

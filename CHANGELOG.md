@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-preview.2（未發佈）
+
+- `ClaudeAgentOptions.SystemPrompt`：`SystemPromptPreset`（Claude Code 預設的系統提示詞，可以在後面附加一段）、
+  `SystemPromptCustom`（自訂全文）、`SystemPromptFile`（從檔案讀）。沒指定時照舊傳空的系統提示詞，跟 Python SDK 一樣。
+- `ClaudeAgentOptions.Effort`：思考深度（`--effort`）。
+- `ClaudeAgentClient.SetModelAsync`：對話中途換模型（`set_model`），對應 Python 的 `set_model()`；
+  另外回傳 CLI 換過去的完整模型 ID（Python 與 TypeScript SDK 不回傳）。
+- `ClaudeAgentClient.ApplyFlagSettingsAsync`：對話中途套用設定（`apply_flag_settings`），例如換思考深度。
+  Python SDK 沒有這個功能，照 TypeScript SDK v0.3.316 的 `applyFlagSettings()` 送出的協定格式寫。
+- 協定樣本加上 `set_model`、`apply_flag_settings` 兩個情境（CLI 2.1.309）。
+
 ## 0.1.0-preview.1（2026-10-30）
 
 - 專案骨架：函式庫、測試專案、打包設定。

@@ -5,8 +5,10 @@ Claude Code 的 .NET 用戶端：啟動本機的 `claude` CLI，用 stream-json 
 A .NET client for Claude Code: it launches the local `claude` CLI and talks to it over the stream-json protocol to chat, approve tool use, interrupt, and resume sessions.
 
 > **非官方**。移植自 [claude-agent-sdk-python](https://github.com/anthropics/claude-agent-sdk-python)，與 Anthropic 無關。官方的 Agent SDK 只有 Python 與 TypeScript。
+> Python SDK 沒有的少數功能，照 TypeScript SDK 送給 CLI 的協定格式另外寫；TypeScript SDK 不是開源授權，沒有移植它的程式碼。
 >
 > **Unofficial.** Ported from [claude-agent-sdk-python](https://github.com/anthropics/claude-agent-sdk-python) and not affiliated with Anthropic. The official Agent SDK is available only for Python and TypeScript.
+> The few features missing from the Python SDK are written against the protocol messages the TypeScript SDK sends to the CLI; the TypeScript SDK is not open-source licensed, and none of its code is ported.
 
 ## 狀態 / Status
 
@@ -21,12 +23,14 @@ dotnet add package PamisWang.ClaudeAgentSdk --prerelease
 | 對照 / Tracks | 版本 / Version |
 |---|---|
 | Python SDK | v0.2.174 |
+| TypeScript SDK | v0.3.316（只參考 Python 沒有的 `apply_flag_settings` / only for `apply_flag_settings`, which Python lacks） |
 | Claude Code CLI | 2.1.312（Python SDK v0.2.174 打包的版本 / bundled with Python SDK v0.2.174） |
 | 錄協定樣本用的 CLI / CLI used to record protocol fixtures | 2.1.309 |
 
 ## 使用方式 / Usage
 
 ```csharp
+using System.Text.Json.Nodes;
 using PamisWang.ClaudeAgentSdk;
 using PamisWang.ClaudeAgentSdk.Messages;
 using PamisWang.ClaudeAgentSdk.Permissions;
@@ -34,6 +38,9 @@ using PamisWang.ClaudeAgentSdk.Permissions;
 var options = new ClaudeAgentOptions
 {
     Cwd = @"D:\work\my-project",
+    SystemPrompt = new SystemPromptPreset(), // Claude Code 預設的系統提示詞；不給是空的 / Claude Code's default system prompt; empty if omitted
+    Model = "sonnet",
+    Effort = "high",
     Resume = null,                        // 接續舊 session 時填 session ID / a session ID to resume
     IncludePartialMessages = true,        // 逐段收到輸出 / receive output as it streams
     DisallowedTools = ["AskUserQuestion"],
@@ -71,7 +78,16 @@ await foreach (var message in client.ReceiveResponseAsync())
 // 接著說下一句，或中斷這一輪 / keep talking, or interrupt the current turn
 await client.SendAsync("那測試怎麼跑？");
 await client.InterruptAsync();
+
+// 對話中途換模型、換思考深度 / switch the model or effort mid-conversation
+await client.SetModelAsync("opus");
+await client.ApplyFlagSettingsAsync(new JsonObject { ["effortLevel"] = "max" });
 ```
+
+- 沒指定 `SystemPrompt` 時跟 Python SDK 一樣傳空的系統提示詞，Claude 不會拿到 Claude Code 預設的那份（寫程式的準則、工作目錄與 git 狀態等）；要跟在終端機用時一樣，指定 `SystemPromptPreset`。
+  Without `SystemPrompt`, an empty system prompt is sent, as in the Python SDK, so Claude does not get Claude Code's default one (coding guidelines, working directory, git status, and so on); use `SystemPromptPreset` to match the terminal experience.
+- 可以選的模型與各自支援的思考深度，在 `ServerInfo` 的 `models` 裡。
+  The available models and the effort levels each supports are listed under `models` in `ServerInfo`.
 
 - `ReceiveResponseAsync` 讀到這一輪的 `ResultMessage` 為止；`ReceiveMessagesAsync` 跨越多輪一直讀，適合在背景持續接收。
   `ReceiveResponseAsync` stops after the turn's `ResultMessage`; `ReceiveMessagesAsync` keeps reading across turns, which suits a background receive loop.
@@ -80,7 +96,7 @@ await client.InterruptAsync();
 - 一個 client 只連線一次；要重新開始就建立新的 client，用 `Resume` 接續原本的 session。
   A client connects once; to start over, create a new client and use `Resume` to continue the session.
 
-## 第一版的範圍 / Scope of the first release
+## 範圍 / Scope
 
 支援 / Supported:
 
@@ -90,6 +106,9 @@ await client.InterruptAsync();
 - 部分訊息串流（`--include-partial-messages`） / Partial message streaming (`--include-partial-messages`)
 - 停用特定工具（`--disallowedTools`） / Disallowing specific tools (`--disallowedTools`)
 - 中斷這一輪 / Interrupting the current turn
+- 系統提示詞：Claude Code 預設的、在預設後面附加、自訂全文、從檔案讀 / System prompts: Claude Code's default, appended to the default, fully custom, or read from a file
+- 指定模型與思考深度（`--model`、`--effort`），對話中途換模型（`set_model`） / Choosing the model and effort (`--model`, `--effort`), and switching models mid-conversation (`set_model`)
+- 對話中途套用設定，例如換思考深度（`apply_flag_settings`；Python SDK 沒有，照 TypeScript SDK 的協定） / Applying settings mid-conversation, such as the effort level (`apply_flag_settings`; missing from the Python SDK, follows the TypeScript SDK's protocol)
 
 不做 / Not planned: hook 回呼、SDK 內的 MCP server、session store、transcript mirror / hook callbacks, in-SDK MCP servers, session stores, transcript mirroring.
 
