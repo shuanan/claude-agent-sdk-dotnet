@@ -47,6 +47,28 @@ public sealed class CliLocatorTests : IDisposable
     }
 
     [Fact]
+    public void Find_OnWindows_NpmShimWithBundledExe_ReturnsBundledExe()
+    {
+        var shim = _temp.CreateFile("npm", "claude.cmd");
+        var bundled = _temp.CreateFile("npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
+        var locator = new CliLocator(Path.GetDirectoryName(shim), Home(), isWindows: true);
+
+        Assert.Equal(bundled, locator.Find(null));
+        locator.EnsureRunnable(bundled);
+    }
+
+    [Fact]
+    public void EnsureRunnable_ExplicitNpmShimWithBundledExe_NamesBundledExe()
+    {
+        var shim = _temp.CreateFile("npm", "claude.cmd");
+        var bundled = _temp.CreateFile("npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
+        var locator = new CliLocator(pathVariable: null, Home(), isWindows: true);
+
+        var error = Assert.Throws<CliConnectionException>(() => locator.EnsureRunnable(shim));
+        Assert.Contains(bundled, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Find_OnWindows_IgnoresExtensionlessScript()
     {
         // git-bash 或 WSL 留下的 claude 腳本，CreateProcess 執行不了

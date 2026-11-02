@@ -44,10 +44,13 @@ internal sealed class CliLocator
 
         // Windows 用 cmd.exe 執行批次檔，cmd.exe 會重新解讀整串參數，參數裡的字元可能被當成指令執行，
         // 而且沒有可靠的跳脫方式（CVE-2024-27980，BatBadBut）。Node.js 的修正也是直接拒絕。
+        var bundled = ExistingFile(NpmBundledExe(cliPath));
         throw new CliConnectionException(
             $"拒絕執行批次檔 {cliPath}：Windows 透過 cmd.exe 執行 .bat、.cmd，參數可能被注入指令。"
-            + "請改用原生的 claude.exe：用 PowerShell 執行 irm https://claude.ai/install.ps1 | iex 安裝，"
-            + "或把 ClaudeAgentOptions.CliPath 指到 claude.exe。");
+            + (bundled is not null
+                ? $"npm 套件附有原生的 {bundled}，請把 ClaudeAgentOptions.CliPath 指到它。"
+                : "請改用原生的 claude.exe：用 PowerShell 執行 irm https://claude.ai/install.ps1 | iex 安裝，"
+                    + "或把 ClaudeAgentOptions.CliPath 指到 claude.exe。"));
     }
 
     /// <summary>
@@ -74,12 +77,25 @@ internal sealed class CliLocator
             return native;
         }
 
+        var shim = SearchPath("claude.cmd");
+
+        // npm 裝的 claude.cmd 只是轉呼叫套件附的原生 claude.exe；直接用那個 exe，不經過 cmd.exe
+        if (shim is not null && ExistingFile(NpmBundledExe(shim)) is { } bundled)
+        {
+            return bundled;
+        }
+
         // 只找得到批次檔：交給 EnsureRunnable 以「拒絕執行批次檔」的說明失敗，而不是籠統的找不到
-        return SearchPath("claude.cmd") ?? SearchPath("claude.bat") ?? throw new CliNotFoundException(
+        return shim ?? SearchPath("claude.bat") ?? throw new CliNotFoundException(
             "找不到 Claude Code。請用 PowerShell 執行 irm https://claude.ai/install.ps1 | iex 安裝原生的 claude.exe，"
             + "或把 ClaudeAgentOptions.CliPath 指到 claude.exe。"
-            + "（npm install -g @anthropic-ai/claude-code 裝的是 claude.cmd，這個套件不會執行它。）");
+            + "（舊版 npm 套件只有 claude.cmd，沒有附 claude.exe，這個套件不會執行它。）");
     }
+
+    /// <summary>npm 全域安裝時，claude.cmd 旁邊 node_modules 裡套件附的 claude.exe。</summary>
+    private static string? NpmBundledExe(string shimPath) => Path.GetDirectoryName(shimPath) is { Length: > 0 } directory
+        ? Path.Combine(directory, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe")
+        : null;
 
     private string FindOnUnix()
     {
@@ -115,5 +131,5 @@ internal sealed class CliLocator
             .FirstOrDefault(File.Exists);
     }
 
-    private static string? ExistingFile(string path) => File.Exists(path) ? path : null;
+    private static string? ExistingFile(string? path) => File.Exists(path) ? path : null;
 }
